@@ -16,6 +16,9 @@ any website; each business gets its own knowledge base (product info + FAQs).
   - `POST /api/admin/crawl` — fetches a business's website (start page + a
     few same-domain About/FAQ/Pricing-ish pages) and extracts clean text to
     pre-fill `businessInfo`. Also protected by `ADMIN_KEY`.
+  - `POST /api/admin/extract-pdf` — extracts text from an uploaded PDF
+    (product brochure, spec sheet, price list, etc.) to pre-fill
+    `businessInfo`. Also protected by `ADMIN_KEY`.
 - `widget/widget.js` — the embeddable script. Vanilla JS, no dependencies, no
   build step. Reads `data-client-id` off its own `<script>` tag and infers the
   API base URL from where it was loaded — so the exact same file works for
@@ -27,16 +30,21 @@ any website; each business gets its own knowledge base (product info + FAQs).
 - `server/data/clients/*.json` — one JSON file per business (their knowledge
   base). A `demo.json` is included so you can try it immediately.
 
-Knowledge base entry has two paths, both landing in the same `businessInfo`
-field on `admin.html`:
+Knowledge base entry has three paths, all landing in the same `businessInfo`
+field on `admin.html` for review before saving — none of them save
+automatically:
 - **Manual** — paste product info and add FAQs directly.
 - **Import from website** — enter the business's URL and click "Fetch
   content"; `server/lib/crawler.js` fetches the page plus a few same-domain
   links that look like About/FAQ/Pricing/Support pages, strips it to clean
-  text, and fills the box for you to review and edit before saving. It never
-  saves automatically — you always get a chance to correct it. Crawling is
-  capped (5 pages, ~12k characters total, 8s timeout per page, 2MB per page)
-  and refuses to fetch private/internal IP addresses.
+  text. Capped (5 pages, ~12k characters total, 8s timeout per page, 2MB per
+  page) and refuses to fetch private/internal IP addresses. Doesn't render
+  JS-heavy sites (no headless browser) — for those, use manual entry instead.
+- **Import from PDF** — upload a product brochure, spec sheet, or price list
+  and click "Extract text"; `server/lib/pdfExtractor.js` pulls the text out
+  (15MB max, ~12k characters kept). Scanned/image-only PDFs (no real text
+  layer) won't extract anything — you'd need to retype that content or paste
+  it manually.
 
 ## Setup
 

@@ -59,6 +59,13 @@
     </div>
     <div id="crawlStatus"></div>
 
+    <label for="pdfFile">Import from a PDF <small>(optional — extracts text from a product brochure, spec sheet, price list, etc. and adds it below)</small></label>
+    <div class="faq-row">
+      <input type="file" id="pdfFile" accept="application/pdf" />
+      <button type="button" id="pdfBtn">Extract text</button>
+    </div>
+    <div id="pdfStatus"></div>
+
     <label for="businessInfo">Business / product info <small>(the more detail, the better the answers)</small></label>
     <textarea id="businessInfo" placeholder="Describe your product, pricing, policies, shipping, support hours, etc." required></textarea>
 
@@ -122,6 +129,40 @@
       .catch(function (err) {
         crawlStatus.textContent = err.message;
         crawlStatus.className = "error";
+      });
+  });
+
+  document.getElementById("pdfBtn").addEventListener("click", function () {
+    var pdfStatus = document.getElementById("pdfStatus");
+    var fileInput = document.getElementById("pdfFile");
+    var adminKey = document.getElementById("adminKey").value;
+    var file = fileInput.files[0];
+    if (!file) { pdfStatus.textContent = "Choose a PDF file first."; pdfStatus.className = "error"; return; }
+    if (!adminKey) { pdfStatus.textContent = "Enter your admin key first."; pdfStatus.className = "error"; return; }
+
+    pdfStatus.textContent = "Extracting text from " + file.name + "...";
+    pdfStatus.className = "";
+
+    var formData = new FormData();
+    formData.append("pdf", file);
+
+    fetch("/api/admin/extract-pdf", {
+      method: "POST",
+      headers: { "x-admin-key": adminKey },
+      body: formData,
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.error || "Extraction failed");
+        var box = document.getElementById("businessInfo");
+        box.value = box.value ? box.value + "\n\n" + res.data.businessInfo : res.data.businessInfo;
+        pdfStatus.textContent = "Imported text from " + res.data.filename + ". Review/edit the text below before saving.";
+        pdfStatus.className = "success";
+        fileInput.value = "";
+      })
+      .catch(function (err) {
+        pdfStatus.textContent = err.message;
+        pdfStatus.className = "error";
       });
   });
 

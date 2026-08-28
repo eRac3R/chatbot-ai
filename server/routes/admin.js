@@ -1,8 +1,21 @@
 const express = require("express");
+const multer = require("multer");
 const { getClient, listClients, upsertClient, deleteClient } = require("../lib/clients");
 const { crawlWebsite } = require("../lib/crawler");
+const { extractPdfText } = require("../lib/pdfExtractor");
 
 const router = express.Router();
+
+const uploadPdf = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype !== "application/pdf") {
+      return cb(new Error("Only PDF files are accepted"));
+    }
+    cb(null, true);
+  },
+});
 
 function requireAdminKey(req, res, next) {
   const provided = req.header("x-admin-key");
@@ -54,6 +67,24 @@ router.post("/crawl", async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// Extracts text from an uploaded PDF (product brochure, spec sheet, terms,
+// etc.) to pre-fill a client's businessInfo. Like /crawl, this only returns
+// extracted text for the admin to review/edit -- it never saves by itself.
+router.post("/extract-pdf", (req, res) => {
+  uploadPdf.single("pdf")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) {
+      return res.status(400).json({ error: "No PDF file uploaded (field name must be 'pdf')" });
+    }
+    try {
+      const businessInfo = await extractPdfText(req.file.buffer);
+      res.json({ businessInfo, filename: req.file.originalname });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
 });
 
 router.delete("/clients/:id", (req, res) => {
