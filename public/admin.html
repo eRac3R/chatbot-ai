@@ -172,7 +172,7 @@
     status.textContent = "Saving...";
     status.className = "";
 
-    var faqs = Array.prototype.slice.call(document.querySelectorAll(".faq-row")).map(function (row) {
+    var faqs = Array.prototype.slice.call(document.querySelectorAll("#faqList .faq-row")).map(function (row) {
       return {
         question: row.querySelector(".faq-q").value.trim(),
         answer: row.querySelector(".faq-a").value.trim(),
