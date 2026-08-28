@@ -1,0 +1,21 @@
+{
+  "name": "chatbot-ai",
+  "version": "1.0.0",
+  "description": "Embeddable AI chatbot widget - answers visitor questions about a business's product, plug-and-play via a single script tag.",
+  "main": "server/index.js",
+  "type": "commonjs",
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.32.1",
+    "cheerio": "^1.0.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.5",
+    "express": "^4.21.1"
+  }
+}

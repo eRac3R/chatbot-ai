@@ -1,0 +1,5 @@
+node_modules
+.env
+*.log
+server/data/clients/*.json
+!server/data/clients/demo.json

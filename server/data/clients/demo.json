@@ -1,0 +1,23 @@
+{
+  "id": "demo",
+  "botName": "Nova",
+  "welcomeMessage": "Hi! I'm Nova, ask me anything about BrightBrew Coffee.",
+  "brandColor": "#6366f1",
+  "tone": "warm, upbeat, and concise",
+  "businessInfo": "BrightBrew Coffee is a specialty coffee subscription service. We ship freshly roasted beans every 2 weeks, sourced directly from small farms in Colombia, Ethiopia, and Guatemala. Plans start at $16/month for a 12oz bag, with options for whole bean or ground. Free shipping on all US orders. You can pause, skip, or cancel your subscription anytime from your account page, no fees. We also sell brewing equipment: pour-over kits ($35), French presses ($28), and burr grinders ($60-120).",
+  "faqs": [
+    {
+      "question": "How do I cancel my subscription?",
+      "answer": "Go to Account > Subscription > Cancel. It takes effect at the end of your current billing cycle and there are no cancellation fees."
+    },
+    {
+      "question": "Do you ship internationally?",
+      "answer": "Currently we only ship within the United States, but international shipping is on our roadmap."
+    },
+    {
+      "question": "What if I don't like the coffee?",
+      "answer": "We offer a 100% satisfaction guarantee on your first bag. Contact support@brightbrew.example within 30 days for a full refund."
+    }
+  ],
+  "updatedAt": "2026-08-28T00:00:00.000Z"
+}

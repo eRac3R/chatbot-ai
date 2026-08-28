@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Chatbot Admin</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root { color-scheme: light dark; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 720px; margin: 40px auto; padding: 0 20px; line-height: 1.5; }
+  h1 { font-size: 22px; }
+  label { display: block; font-weight: 600; margin: 16px 0 4px; font-size: 14px; }
+  small { color: #888; font-weight: 400; }
+  input[type=text], input[type=password], input[type=color], textarea {
+    width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid #ccc; border-radius: 6px; font-size: 14px; font-family: inherit;
+  }
+  textarea { min-height: 100px; resize: vertical; }
+  fieldset { border: 1px solid #ddd; border-radius: 8px; margin-top: 24px; padding: 14px; }
+  .faq-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .faq-row input { flex: 1; }
+  .faq-row button { flex-shrink: 0; }
+  button { cursor: pointer; }
+  #addFaq { margin-top: 4px; }
+  #submit { margin-top: 20px; padding: 10px 18px; font-size: 15px; background: #6366f1; color: #fff; border: none; border-radius: 6px; }
+  #submit:hover { background: #4f46e5; }
+  #result { margin-top: 24px; padding: 16px; background: #f4f4f8; border-radius: 8px; display: none; }
+  #result pre { white-space: pre-wrap; word-break: break-all; background: #1e1e2e; color: #e4e4f0; padding: 12px; border-radius: 6px; font-size: 12px; }
+  #status { margin-top: 10px; font-size: 13px; }
+  .error { color: #c0392b; }
+  .success { color: #2e7d32; }
+</style>
+</head>
+<body>
+  <h1>Set up your chat widget</h1>
+  <p>Fill this in once, then paste the embed snippet into your website. No code changes needed after that.</p>
+
+  <form id="clientForm">
+    <label for="adminKey">Admin key <small>(from the server's .env — keeps this form private to you)</small></label>
+    <input type="password" id="adminKey" required />
+
+    <label for="clientId">Client ID <small>(letters/numbers/-/_, becomes part of your widget URL)</small></label>
+    <input type="text" id="clientId" placeholder="acme-co" pattern="[a-zA-Z0-9_-]{3,64}" required />
+
+    <label for="botName">Bot name</label>
+    <input type="text" id="botName" placeholder="Assistant" value="Assistant" required />
+
+    <label for="welcomeMessage">Welcome message</label>
+    <input type="text" id="welcomeMessage" placeholder="Hi! How can I help you today?" value="Hi! How can I help you today?" required />
+
+    <label for="brandColor">Brand color</label>
+    <input type="color" id="brandColor" value="#6366f1" />
+
+    <label for="tone">Tone</label>
+    <input type="text" id="tone" placeholder="friendly and concise" value="friendly and concise" />
+
+    <label for="crawlUrl">Import from your website <small>(optional — fetches your site and a few linked pages like About/FAQ/Pricing, and fills the box below for you to review)</small></label>
+    <div class="faq-row">
+      <input type="text" id="crawlUrl" placeholder="https://yourbusiness.com" />
+      <button type="button" id="crawlBtn">Fetch content</button>
+    </div>
+    <div id="crawlStatus"></div>
+
+    <label for="businessInfo">Business / product info <small>(the more detail, the better the answers)</small></label>
+    <textarea id="businessInfo" placeholder="Describe your product, pricing, policies, shipping, support hours, etc." required></textarea>
+
+    <fieldset>
+      <legend>FAQs (optional)</legend>
+      <div id="faqList"></div>
+      <button type="button" id="addFaq">+ Add FAQ</button>
+    </fieldset>
+
+    <button type="submit" id="submit">Save & get embed code</button>
+    <div id="status"></div>
+  </form>
+
+  <div id="result">
+    <p>Your widget is live. Paste this snippet just before <code>&lt;/body&gt;</code> on your site:</p>
+    <pre id="snippet"></pre>
+  </div>
+
+<script>
+  var faqList = document.getElementById("faqList");
+
+  function addFaqRow(question, answer) {
+    var row = document.createElement("div");
+    row.className = "faq-row";
+    var q = document.createElement("input");
+    q.type = "text"; q.placeholder = "Question"; q.className = "faq-q"; q.value = question || "";
+    var a = document.createElement("input");
+    a.type = "text"; a.placeholder = "Answer"; a.className = "faq-a"; a.value = answer || "";
+    var del = document.createElement("button");
+    del.type = "button"; del.textContent = "✕";
+    del.addEventListener("click", function () { row.remove(); });
+    row.appendChild(q); row.appendChild(a); row.appendChild(del);
+    faqList.appendChild(row);
+  }
+  document.getElementById("addFaq").addEventListener("click", function () { addFaqRow(); });
+  addFaqRow();
+
+  document.getElementById("crawlBtn").addEventListener("click", function () {
+    var crawlStatus = document.getElementById("crawlStatus");
+    var url = document.getElementById("crawlUrl").value.trim();
+    var adminKey = document.getElementById("adminKey").value;
+    if (!url) { crawlStatus.textContent = "Enter a URL first."; crawlStatus.className = "error"; return; }
+    if (!adminKey) { crawlStatus.textContent = "Enter your admin key first."; crawlStatus.className = "error"; return; }
+
+    crawlStatus.textContent = "Fetching your site...";
+    crawlStatus.className = "";
+
+    fetch("/api/admin/crawl", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-admin-key": adminKey },
+      body: JSON.stringify({ url: url }),
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.error || "Fetch failed");
+        var box = document.getElementById("businessInfo");
+        box.value = box.value ? box.value + "\n\n" + res.data.businessInfo : res.data.businessInfo;
+        crawlStatus.textContent = "Imported " + res.data.pages.length + " page(s): " + res.data.pages.join(", ") + ". Review/edit the text below before saving.";
+        crawlStatus.className = "success";
+      })
+      .catch(function (err) {
+        crawlStatus.textContent = err.message;
+        crawlStatus.className = "error";
+      });
+  });
+
+  document.getElementById("clientForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var status = document.getElementById("status");
+    status.textContent = "Saving...";
+    status.className = "";
+
+    var faqs = Array.prototype.slice.call(document.querySelectorAll(".faq-row")).map(function (row) {
+      return {
+        question: row.querySelector(".faq-q").value.trim(),
+        answer: row.querySelector(".faq-a").value.trim(),
+      };
+    }).filter(function (f) { return f.question && f.answer; });
+
+    var payload = {
+      id: document.getElementById("clientId").value.trim(),
+      botName: document.getElementById("botName").value.trim(),
+      welcomeMessage: document.getElementById("welcomeMessage").value.trim(),
+      brandColor: document.getElementById("brandColor").value,
+      tone: document.getElementById("tone").value.trim(),
+      businessInfo: document.getElementById("businessInfo").value.trim(),
+      faqs: faqs,
+    };
+
+    fetch("/api/admin/clients", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-admin-key": document.getElementById("adminKey").value,
+      },
+      body: JSON.stringify(payload),
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.error || "Save failed");
+        status.textContent = "Saved!";
+        status.className = "success";
+        var snippet =
+          '<script src="' + window.location.origin + '/widget.js" data-client-id="' + payload.id + '"><' + '/script>';
+        document.getElementById("snippet").textContent = snippet;
+        document.getElementById("result").style.display = "block";
+      })
+      .catch(function (err) {
+        status.textContent = err.message;
+        status.className = "error";
+      });
+  });
+</script>
+</body>
+</html>
