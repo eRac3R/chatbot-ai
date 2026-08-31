@@ -49,7 +49,10 @@ function toGeminiContents(history, userMessage) {
 
 async function getChatReply({ clientConfig, history, userMessage }) {
   const ai = getClient();
-  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+  // "-lite" trades some quality for much lower latency (~1s vs ~20s in
+  // testing against the full "-latest" flash model) -- worth it for a chat
+  // widget answering straightforward product questions.
+  const model = process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
 
   const response = await ai.models.generateContent({
     model,
