@@ -1,14 +1,14 @@
-const Anthropic = require("@anthropic-ai/sdk");
+const { GoogleGenAI } = require("@google/genai");
 
 let client = null;
 function getClient() {
-  if (!process.env.ANTHROPIC_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     throw new Error(
-      "ANTHROPIC_API_KEY is not set. Add it to your .env file (see .env.example)."
+      "GEMINI_API_KEY is not set. Add it to your .env file (see .env.example)."
     );
   }
   if (!client) {
-    client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+    client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
   }
   return client;
 }
@@ -36,24 +36,31 @@ function buildSystemPrompt(clientConfig) {
   ].join("\n");
 }
 
+// history entries use {role: "user"|"assistant", content}; Gemini wants
+// {role: "user"|"model", parts: [{text}]}.
+function toGeminiContents(history, userMessage) {
+  const contents = history.map((m) => ({
+    role: m.role === "assistant" ? "model" : "user",
+    parts: [{ text: m.content }],
+  }));
+  contents.push({ role: "user", parts: [{ text: userMessage }] });
+  return contents;
+}
+
 async function getChatReply({ clientConfig, history, userMessage }) {
-  const anthropic = getClient();
-  const model = process.env.CLAUDE_MODEL || "claude-sonnet-5";
+  const ai = getClient();
+  const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
 
-  const messages = [
-    ...history,
-    { role: "user", content: userMessage },
-  ];
-
-  const response = await anthropic.messages.create({
+  const response = await ai.models.generateContent({
     model,
-    max_tokens: 500,
-    system: buildSystemPrompt(clientConfig),
-    messages,
+    contents: toGeminiContents(history, userMessage),
+    config: {
+      systemInstruction: buildSystemPrompt(clientConfig),
+      maxOutputTokens: 500,
+    },
   });
 
-  const textBlock = response.content.find((block) => block.type === "text");
-  return textBlock ? textBlock.text : "";
+  return response.text || "";
 }
 
 module.exports = { getChatReply, buildSystemPrompt };

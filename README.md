@@ -1,7 +1,7 @@
 # chatbot-ai
 
 A plug-and-play AI chat widget (like Tawk.to) that answers visitors' questions
-about a business's product, powered by Claude. One `<script>` tag embeds it on
+about a business's product, powered by Google Gemini (free tier). One `<script>` tag embeds it on
 any website; each business gets its own knowledge base (product info + FAQs).
 
 ## How it fits together
@@ -54,7 +54,8 @@ cp .env.example .env
 ```
 
 Edit `.env`:
-- `ANTHROPIC_API_KEY` — get one at https://console.anthropic.com
+- `GEMINI_API_KEY` — get a free one at https://aistudio.google.com/apikey
+  (no credit card required)
 - `ADMIN_KEY` — set this to a long random string (used to protect the admin
   panel/API)
 

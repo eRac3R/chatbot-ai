@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { getClient, getPublicClient } = require("../lib/clients");
-const { getChatReply } = require("../lib/anthropic");
+const { getChatReply } = require("../lib/gemini");
 const { getHistory, appendTurn } = require("../lib/history");
 
 const router = express.Router();
