@@ -23,8 +23,8 @@ function isRateLimited(sessionId) {
   return bucket.count > RATE_LIMIT;
 }
 
-router.get("/clients/:id/public", (req, res) => {
-  const config = getPublicClient(req.params.id);
+router.get("/clients/:id/public", async (req, res) => {
+  const config = await getPublicClient(req.params.id);
   if (!config) return res.status(404).json({ error: "Unknown client id" });
   res.json(config);
 });
@@ -43,7 +43,7 @@ router.post("/chat", async (req, res) => {
     sessionId = crypto.randomUUID();
   }
 
-  const clientConfig = getClient(clientId);
+  const clientConfig = await getClient(clientId);
   if (!clientConfig) {
     return res.status(404).json({ error: "Unknown client id" });
   }
@@ -53,9 +53,9 @@ router.post("/chat", async (req, res) => {
   }
 
   try {
-    const history = getHistory(sessionId);
+    const history = await getHistory(sessionId);
     const reply = await getChatReply({ clientConfig, history, userMessage: message });
-    appendTurn(sessionId, message, reply);
+    await appendTurn(sessionId, message, reply);
     res.json({ reply, sessionId });
   } catch (err) {
     console.error("chat error:", err.message);

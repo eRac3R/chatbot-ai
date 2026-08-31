@@ -28,9 +28,16 @@ app.use(express.static(path.join(__dirname, "..", "public")));
 
 app.get("/health", (req, res) => res.json({ ok: true }));
 
-app.listen(PORT, () => {
-  console.log(`chatbot-ai server listening on http://localhost:${PORT}`);
-  console.log(`  Widget script:  http://localhost:${PORT}/widget.js`);
-  console.log(`  Admin panel:    http://localhost:${PORT}/admin.html`);
-  console.log(`  Demo page:      http://localhost:${PORT}/demo.html`);
-});
+// Vercel (see api/index.js) imports `app` and handles incoming requests
+// itself -- it must NOT also bind a port. Only listen when this file is run
+// directly, e.g. `node server/index.js` / `npm start`.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`chatbot-ai server listening on http://localhost:${PORT}`);
+    console.log(`  Widget script:  http://localhost:${PORT}/widget.js`);
+    console.log(`  Admin panel:    http://localhost:${PORT}/admin.html`);
+    console.log(`  Demo page:      http://localhost:${PORT}/demo.html`);
+  });
+}
+
+module.exports = app;

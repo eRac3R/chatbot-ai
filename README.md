@@ -28,7 +28,11 @@ any website; each business gets its own knowledge base (product info + FAQs).
 - `public/demo.html` — a stand-in customer website with the widget embedded,
   for end-to-end testing.
 - `server/data/clients/*.json` — one JSON file per business (their knowledge
-  base). A `demo.json` is included so you can try it immediately.
+  base), used in local dev. A `demo.json` is included so you can try it
+  immediately. When `UPSTASH_REDIS_REST_URL`/`_TOKEN` are set (required on
+  Vercel — see Deploying below), `server/lib/clients.js` and
+  `server/lib/history.js` transparently switch to Redis instead, since
+  serverless hosts don't offer a persistent disk or long-lived memory.
 
 Knowledge base entry has three paths, all landing in the same `businessInfo`
 field on `admin.html` for review before saving — none of them save
@@ -97,14 +101,42 @@ docker run -p 3000:3000 --env-file .env -v chatbot-ai-data:/app/server/data/clie
 
 The `-v` volume mount is important — client knowledge bases live in
 `server/data/clients/*.json`; without a mounted volume they're wiped every
-time the container is rebuilt.
+time the container is rebuilt. (Or set `UPSTASH_REDIS_REST_URL`/`_TOKEN` as
+below and skip the volume entirely.)
 
-Notes for production:
-- Session/rate-limit state is in-memory (`server/lib/history.js`), fine for a
-  single instance; move to Redis if you scale horizontally.
-- Client knowledge bases are flat JSON files; swap `server/lib/clients.js`
-  for a real database if you expect many clients or need concurrent admin
-  writes.
+**Vercel:**
+
+Vercel runs your code in short-lived serverless functions — there's no
+persistent disk and no long-lived process memory, so the plain-file/
+in-memory storage used for local dev won't work there (saved clients would
+vanish, chat "memory" wouldn't persist between messages). This repo already
+has the Vercel-compatible pieces:
+- `api/index.js` + `vercel.json` — routes every request through the same
+  Express app used locally, so nothing else about the app changes.
+- `server/lib/store.js` — the Redis switch: `clients.js` and `history.js`
+  automatically use Redis instead of files/memory once it's configured.
+
+Steps:
+1. Create a free Redis database at https://console.upstash.com (no card
+   required) and copy its **REST URL** and **REST TOKEN**.
+2. `vercel` CLI (`npm i -g vercel`, then `vercel`) or connect the repo at
+   vercel.com — either way, add these environment variables in the Vercel
+   project settings: `GEMINI_API_KEY`, `ADMIN_KEY`, `UPSTASH_REDIS_REST_URL`,
+   `UPSTASH_REDIS_REST_TOKEN` (same values as your local `.env`).
+3. Deploy. Your admin panel and widget are now at
+   `https://your-project.vercel.app/admin.html` and
+   `https://your-project.vercel.app/widget.js` — swap that domain into every
+   client's embed snippet in place of `localhost:3000`.
+
+Notes for production (Vercel or otherwise):
+- The per-session rate limiter in `server/routes/chat.js` is still plain
+  in-memory (not Redis-backed) — on Vercel this resets on cold starts and
+  isn't shared across concurrent instances. Not a data-loss risk like the
+  client/history storage was, just a weaker rate limit; move it to Redis too
+  if that matters for your traffic.
+- Client knowledge bases are single JSON blobs per client (file or Redis
+  key); swap for a real relational database if you expect very high client
+  counts or need concurrent-safe partial updates.
 - `ALLOWED_ORIGINS=*` in `.env` allows any website to call `/api/chat`, which
   is normal for a public embeddable widget (this is how Tawk.to/Intercom
   work too) — the client's `data-client-id` scopes what knowledge is used,

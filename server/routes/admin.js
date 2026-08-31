@@ -33,19 +33,19 @@ function requireAdminKey(req, res, next) {
 
 router.use(requireAdminKey);
 
-router.get("/clients", (req, res) => {
-  res.json({ clients: listClients() });
+router.get("/clients", async (req, res) => {
+  res.json({ clients: await listClients() });
 });
 
-router.get("/clients/:id", (req, res) => {
-  const client = getClient(req.params.id);
+router.get("/clients/:id", async (req, res) => {
+  const client = await getClient(req.params.id);
   if (!client) return res.status(404).json({ error: "Unknown client id" });
   res.json(client);
 });
 
-router.post("/clients", (req, res) => {
+router.post("/clients", async (req, res) => {
   try {
-    const saved = upsertClient(req.body || {});
+    const saved = await upsertClient(req.body || {});
     res.json(saved);
   } catch (err) {
     res.status(400).json({ error: err.message });
@@ -87,8 +87,8 @@ router.post("/extract-pdf", (req, res) => {
   });
 });
 
-router.delete("/clients/:id", (req, res) => {
-  const deleted = deleteClient(req.params.id);
+router.delete("/clients/:id", async (req, res) => {
+  const deleted = await deleteClient(req.params.id);
   if (!deleted) return res.status(404).json({ error: "Unknown client id" });
   res.json({ deleted: true });
 });
