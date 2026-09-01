@@ -24,7 +24,19 @@ any website; each business gets its own knowledge base (product info + FAQs).
   API base URL from where it was loaded — so the exact same file works for
   every customer with zero configuration.
 - `public/admin.html` — a simple form to create/update a client's knowledge
-  base and get the embed snippet to hand to the business.
+  base and get the embed snippet to hand to the business. Besides the
+  knowledge base it also sets the widget's presentation:
+  - **Bot profile picture** (`avatarUrl`) — shown in the chat header and beside
+    every bot message. Falls back to the bot's initials when blank or if the
+    image fails to load. Only `http(s)` URLs are accepted (`clients.js`
+    strips anything else, since the widget renders it into an `<img src>`).
+  - **Personality** (`tone`) — free-form, as long as you like: voice, quirks,
+    phrases to use or avoid, how to handle a frustrated visitor. It shapes
+    *how* the bot speaks; the factual "only use the business info" rules
+    still win, so a persona can't talk the bot into inventing facts.
+  - **Quick reply buttons** (`quickReplies`) — up to 4 suggested questions
+    rendered as tappable chips under the welcome message, so visitors can
+    start without typing. They disappear once the visitor sends anything.
 - `public/demo.html` — a stand-in customer website with the widget embedded,
   for end-to-end testing.
 - `server/data/clients/*.json` — one JSON file per business (their knowledge

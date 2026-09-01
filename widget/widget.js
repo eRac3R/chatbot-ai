@@ -36,39 +36,135 @@
   }
 
   var sessionId = getSessionId();
-  var config = { botName: "Assistant", welcomeMessage: "Hi! How can I help?", brandColor: "#6366f1" };
+  var config = {
+    botName: "Assistant",
+    welcomeMessage: "Hi! How can I help?",
+    brandColor: "#6366f1",
+    avatarUrl: "",
+    quickReplies: [],
+  };
+
+  // Who the visitor is currently talking to. Defaults to the AI bot; if the
+  // server ever reports a human agent has joined (reply payload's `agent`
+  // field), this swaps to their name/photo for the header and all subsequent
+  // messages.
+  var currentResponder = null;
 
   var els = {};
   var isOpen = false;
   var hasLoadedWelcome = false;
 
-  function injectStyles(brandColor) {
+  // ---- small color helpers, so the widget adapts to any brand color ----
+
+  function parseHex(hex) {
+    var h = String(hex || "").replace("#", "");
+    if (h.length === 3) h = h[0] + h[0] + h[1] + h[1] + h[2] + h[2];
+    if (!/^[0-9a-fA-F]{6}$/.test(h)) return { r: 99, g: 102, b: 241 };
+    return {
+      r: parseInt(h.slice(0, 2), 16),
+      g: parseInt(h.slice(2, 4), 16),
+      b: parseInt(h.slice(4, 6), 16),
+    };
+  }
+
+  function shade(hex, percent) {
+    var c = parseHex(hex);
+    var t = percent < 0 ? 0 : 255;
+    var p = Math.abs(percent);
+    return (
+      "rgb(" +
+      Math.round((t - c.r) * p + c.r) + "," +
+      Math.round((t - c.g) * p + c.g) + "," +
+      Math.round((t - c.b) * p + c.b) + ")"
+    );
+  }
+
+  function rgba(hex, alpha) {
+    var c = parseHex(hex);
+    return "rgba(" + c.r + "," + c.g + "," + c.b + "," + alpha + ")";
+  }
+
+  // Pick readable text for the brand color -- a pale brand color needs dark
+  // text, not the usual white.
+  function contrastText(hex) {
+    var c = parseHex(hex);
+    var luminance = (0.299 * c.r + 0.587 * c.g + 0.114 * c.b) / 255;
+    return luminance > 0.65 ? "#1a1a1a" : "#ffffff";
+  }
+
+  function initialsOf(name) {
+    var parts = String(name || "?").trim().split(/\s+/).slice(0, 2);
+    return parts.map(function (p) { return p.charAt(0).toUpperCase(); }).join("");
+  }
+
+  function injectStyles(brand) {
+    var onBrand = contrastText(brand);
     var style = document.createElement("style");
     style.textContent =
-      "#cw-root{position:fixed;bottom:20px;right:20px;z-index:2147483000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif}" +
-      "#cw-bubble{width:60px;height:60px;border-radius:50%;background:" + brandColor + ";box-shadow:0 4px 14px rgba(0,0,0,.25);cursor:pointer;display:flex;align-items:center;justify-content:center;border:none;transition:transform .15s ease}" +
-      "#cw-bubble:hover{transform:scale(1.06)}" +
-      "#cw-bubble svg{width:28px;height:28px}" +
-      "#cw-window{position:fixed;bottom:92px;right:20px;width:360px;max-width:calc(100vw - 32px);height:520px;max-height:calc(100vh - 140px);background:#fff;border-radius:16px;box-shadow:0 12px 40px rgba(0,0,0,.2);display:none;flex-direction:column;overflow:hidden}" +
-      "#cw-window.cw-open{display:flex}" +
-      "#cw-header{background:" + brandColor + ";color:#fff;padding:16px;font-weight:600;display:flex;justify-content:space-between;align-items:center;flex-shrink:0}" +
-      "#cw-close{background:none;border:none;color:#fff;font-size:20px;cursor:pointer;line-height:1;opacity:.85}" +
-      "#cw-close:hover{opacity:1}" +
-      "#cw-messages{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:10px;background:#f7f7f9}" +
-      ".cw-msg{max-width:80%;padding:10px 13px;border-radius:14px;font-size:14px;line-height:1.4;white-space:pre-wrap;word-wrap:break-word}" +
-      ".cw-msg-bot{align-self:flex-start;background:#fff;color:#1a1a1a;border:1px solid #e5e5ea;border-bottom-left-radius:4px}" +
-      ".cw-msg-user{align-self:flex-end;background:" + brandColor + ";color:#fff;border-bottom-right-radius:4px}" +
-      ".cw-msg-typing{align-self:flex-start;background:#fff;border:1px solid #e5e5ea;border-bottom-left-radius:4px;padding:12px 16px}" +
-      ".cw-dot{display:inline-block;width:6px;height:6px;margin:0 2px;border-radius:50%;background:#9a9aa2;animation:cw-bounce 1.2s infinite ease-in-out}" +
-      ".cw-dot:nth-child(2){animation-delay:.15s}.cw-dot:nth-child(3){animation-delay:.3s}" +
-      "@keyframes cw-bounce{0%,60%,100%{transform:translateY(0)}30%{transform:translateY(-4px)}}" +
-      "#cw-inputbar{display:flex;gap:8px;padding:12px;border-top:1px solid #eee;flex-shrink:0;background:#fff}" +
-      "#cw-input{flex:1;border:1px solid #ddd;border-radius:20px;padding:10px 14px;font-size:14px;outline:none;resize:none;max-height:80px;font-family:inherit}" +
-      "#cw-input:focus{border-color:" + brandColor + "}" +
-      "#cw-send{background:" + brandColor + ";border:none;color:#fff;width:38px;height:38px;border-radius:50%;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center}" +
-      "#cw-send:disabled{opacity:.5;cursor:default}" +
-      "#cw-footer{text-align:center;font-size:11px;color:#aaa;padding:4px 0 8px}" +
-      "@media (max-width:480px){#cw-window{right:16px;bottom:88px}}";
+      "#cw-root{position:fixed;bottom:20px;right:20px;z-index:2147483000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}" +
+
+      /* launcher bubble */
+      "#cw-bubble{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg," + brand + "," + shade(brand, -0.2) + ");box-shadow:0 6px 20px " + rgba(brand, 0.45) + ",0 2px 6px rgba(0,0,0,.12);cursor:pointer;display:flex;align-items:center;justify-content:center;border:none;padding:0;transition:transform .2s cubic-bezier(.34,1.56,.64,1),box-shadow .2s ease}" +
+      "#cw-bubble:hover{transform:scale(1.08)}" +
+      "#cw-bubble:active{transform:scale(.96)}" +
+      "#cw-bubble svg{width:27px;height:27px;transition:transform .25s ease}" +
+      "#cw-root.cw-is-open #cw-bubble svg.cw-ico-chat{display:none}" +
+      "#cw-root:not(.cw-is-open) #cw-bubble svg.cw-ico-close{display:none}" +
+
+      /* window */
+      "#cw-window{position:fixed;bottom:92px;right:20px;width:380px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 130px);background:#fff;border-radius:20px;box-shadow:0 16px 48px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);display:flex;flex-direction:column;overflow:hidden;opacity:0;transform:translateY(12px) scale(.97);pointer-events:none;transition:opacity .22s ease,transform .22s cubic-bezier(.34,1.3,.64,1)}" +
+      "#cw-window.cw-open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}" +
+
+      /* header */
+      "#cw-header{background:linear-gradient(135deg," + brand + "," + shade(brand, -0.22) + ");color:" + onBrand + ";padding:16px 18px;display:flex;align-items:center;gap:12px;flex-shrink:0}" +
+      "#cw-header-info{flex:1;min-width:0}" +
+      "#cw-title{font-weight:650;font-size:15.5px;line-height:1.25;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}" +
+      "#cw-status{font-size:12px;opacity:.85;display:flex;align-items:center;gap:5px;margin-top:2px}" +
+      "#cw-status i{width:7px;height:7px;border-radius:50%;background:#4ade80;display:inline-block;box-shadow:0 0 0 2px " + rgba("#4ade80", 0.3) + "}" +
+      "#cw-close{background:rgba(255,255,255,.16);border:none;color:" + onBrand + ";width:30px;height:30px;border-radius:50%;font-size:17px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s ease}" +
+      "#cw-close:hover{background:rgba(255,255,255,.3)}" +
+
+      /* avatars */
+      ".cw-avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;object-fit:cover;display:flex;align-items:center;justify-content:center;font-weight:650;font-size:14px;overflow:hidden;background:" + shade(brand, 0.75) + ";color:" + shade(brand, -0.35) + "}" +
+      "#cw-header .cw-avatar{box-shadow:0 0 0 2px rgba(255,255,255,.35);background:rgba(255,255,255,.22);color:" + onBrand + "}" +
+      ".cw-avatar-sm{width:26px;height:26px;font-size:10.5px;align-self:flex-end;margin-bottom:2px}" +
+
+      /* messages */
+      "#cw-messages{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:10px;background:#f7f8fa;scroll-behavior:smooth}" +
+      "#cw-messages::-webkit-scrollbar{width:6px}" +
+      "#cw-messages::-webkit-scrollbar-thumb{background:#d4d6dd;border-radius:3px}" +
+      "#cw-messages::-webkit-scrollbar-track{background:transparent}" +
+      ".cw-row{display:flex;gap:8px;align-items:flex-end;animation:cw-in .28s cubic-bezier(.34,1.3,.64,1)}" +
+      ".cw-row-user{justify-content:flex-end}" +
+      "@keyframes cw-in{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}" +
+      ".cw-msg{max-width:78%;padding:10px 14px;border-radius:18px;font-size:14.5px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}" +
+      ".cw-msg-bot{background:#fff;color:#1a1c22;border:1px solid #e8e9ee;border-bottom-left-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.04)}" +
+      ".cw-msg-user{background:linear-gradient(135deg," + brand + "," + shade(brand, -0.15) + ");color:" + onBrand + ";border-bottom-right-radius:6px}" +
+
+      /* quick replies */
+      "#cw-quick{display:flex;flex-wrap:wrap;gap:7px;padding:2px 0 2px 34px;animation:cw-in .3s ease}" +
+      ".cw-chip{background:#fff;border:1.5px solid " + rgba(brand, 0.35) + ";color:" + shade(brand, -0.25) + ";padding:7px 13px;border-radius:16px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease;line-height:1.3}" +
+      ".cw-chip:hover{background:" + rgba(brand, 0.08) + ";border-color:" + brand + ";transform:translateY(-1px)}" +
+      ".cw-chip:active{transform:translateY(0)}" +
+
+      /* typing indicator */
+      ".cw-typing{background:#fff;border:1px solid #e8e9ee;border-bottom-left-radius:6px;border-radius:18px;padding:13px 16px;display:flex;gap:4px;align-items:center}" +
+      ".cw-dot{width:7px;height:7px;border-radius:50%;background:#b6b9c4;animation:cw-bounce 1.3s infinite ease-in-out}" +
+      ".cw-dot:nth-child(2){animation-delay:.16s}.cw-dot:nth-child(3){animation-delay:.32s}" +
+      "@keyframes cw-bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-5px);opacity:1}}" +
+
+      /* composer */
+      "#cw-inputbar{display:flex;gap:8px;padding:12px 14px;border-top:1px solid #ecedf1;flex-shrink:0;background:#fff;align-items:flex-end}" +
+      "#cw-input{flex:1;border:1.5px solid #e2e4ea;border-radius:22px;padding:10px 15px;font-size:14.5px;outline:none;resize:none;max-height:96px;font-family:inherit;line-height:1.45;color:#1a1c22;transition:border-color .15s ease,box-shadow .15s ease;background:#fafbfc}" +
+      "#cw-input:focus{border-color:" + brand + ";background:#fff;box-shadow:0 0 0 3px " + rgba(brand, 0.12) + "}" +
+      "#cw-input::placeholder{color:#a8abb6}" +
+      "#cw-send{background:linear-gradient(135deg," + brand + "," + shade(brand, -0.18) + ");border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;transition:transform .15s ease,opacity .15s ease}" +
+      "#cw-send:hover:not(:disabled){transform:scale(1.06)}" +
+      "#cw-send:disabled{opacity:.45;cursor:default}" +
+      "#cw-send svg{width:17px;height:17px}" +
+      "#cw-footer{text-align:center;font-size:11px;color:#b0b3bd;padding:0 0 9px;background:#fff;letter-spacing:.01em}" +
+
+      "@media (max-width:480px){#cw-window{right:12px;left:12px;bottom:88px;width:auto;max-width:none;height:calc(100vh - 120px)}#cw-root{right:16px;bottom:16px}}";
     document.head.appendChild(style);
   }
 
@@ -80,10 +176,36 @@
         else node.setAttribute(k, attrs[k]);
       });
     }
-    (children || []).forEach(function (c) {
-      node.appendChild(c);
-    });
+    (children || []).forEach(function (c) { node.appendChild(c); });
     return node;
+  }
+
+  // Builds an avatar for whoever is currently answering (bot, or a human
+  // agent if one has taken over). Falls back to initials when there's no
+  // usable image.
+  function makeAvatar(small) {
+    var responder = currentResponder || { name: config.botName, avatarUrl: config.avatarUrl };
+    var cls = "cw-avatar" + (small ? " cw-avatar-sm" : "");
+    if (responder.avatarUrl) {
+      var img = el("img", { class: cls, src: responder.avatarUrl, alt: responder.name || "" });
+      // If the image 404s or is blocked, swap in initials rather than
+      // leaving a broken-image icon in the header.
+      img.addEventListener("error", function () {
+        var fallback = el("div", { class: cls, text: initialsOf(responder.name) });
+        if (img.parentNode) img.parentNode.replaceChild(fallback, img);
+      });
+      return img;
+    }
+    return el("div", { class: cls, text: initialsOf(responder.name) });
+  }
+
+  function refreshHeaderIdentity() {
+    var responder = currentResponder || { name: config.botName, avatarUrl: config.avatarUrl };
+    els.title.textContent = responder.name || config.botName;
+    els.statusText.textContent = currentResponder ? "Live agent" : "Online";
+    var fresh = makeAvatar(false);
+    els.headerAvatar.parentNode.replaceChild(fresh, els.headerAvatar);
+    els.headerAvatar = fresh;
   }
 
   function buildUI() {
@@ -91,91 +213,121 @@
 
     var bubble = el("button", { id: "cw-bubble", "aria-label": "Open chat" });
     bubble.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>';
+      '<svg class="cw-ico-chat" viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) + '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>' +
+      '<svg class="cw-ico-close" viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) + '" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>';
 
-    var win = el("div", { id: "cw-window" });
-    var header = el("div", { id: "cw-header" }, [
-      el("span", { id: "cw-title", text: config.botName }),
-      el("button", { id: "cw-close", "aria-label": "Close chat", text: "✕" }),
-    ]);
+    var win = el("div", { id: "cw-window", role: "dialog", "aria-label": "Chat" });
+
+    var headerAvatar = makeAvatar(false);
+    var title = el("span", { id: "cw-title", text: config.botName });
+    var statusDot = el("i", {});
+    var statusText = el("span", { text: "Online" });
+    var status = el("div", { id: "cw-status" }, [statusDot, statusText]);
+    var headerInfo = el("div", { id: "cw-header-info" }, [title, status]);
+    var closeBtn = el("button", { id: "cw-close", "aria-label": "Close chat", text: "✕" });
+    var header = el("div", { id: "cw-header" }, [headerAvatar, headerInfo, closeBtn]);
+
     var messages = el("div", { id: "cw-messages" });
-    var inputBar = el("div", { id: "cw-inputbar" }, [
-      el("textarea", { id: "cw-input", rows: "1", placeholder: "Type a message..." }),
-      (function () {
-        var b = el("button", { id: "cw-send", "aria-label": "Send" });
-        b.innerHTML =
-          '<svg viewBox="0 0 24 24" width="18" height="18" fill="white"><path d="M2 21l21-9L2 3v7l15 2-15 2z"></path></svg>';
-        return b;
-      })(),
-    ]);
+
+    var input = el("textarea", { id: "cw-input", rows: "1", placeholder: "Type a message…" });
+    var send = el("button", { id: "cw-send", "aria-label": "Send" });
+    send.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="' + contrastText(config.brandColor) + '"><path d="M2 21l21-9L2 3v7l15 2-15 2z"></path></svg>';
+    var inputBar = el("div", { id: "cw-inputbar" }, [input, send]);
+
     var footer = el("div", { id: "cw-footer", text: "Powered by chatbot-ai" });
 
     win.appendChild(header);
     win.appendChild(messages);
     win.appendChild(inputBar);
     win.appendChild(footer);
-
     root.appendChild(win);
     root.appendChild(bubble);
     document.body.appendChild(root);
 
-    els.root = root;
-    els.bubble = bubble;
-    els.window = win;
-    els.header = header;
-    els.title = header.querySelector("#cw-title");
-    els.close = header.querySelector("#cw-close");
-    els.messages = messages;
-    els.input = inputBar.querySelector("#cw-input");
-    els.send = inputBar.querySelector("#cw-send");
+    els = {
+      root: root, bubble: bubble, window: win, headerAvatar: headerAvatar,
+      title: title, statusText: statusText, close: closeBtn,
+      messages: messages, input: input, send: send,
+    };
 
-    els.bubble.addEventListener("click", toggleOpen);
-    els.close.addEventListener("click", toggleOpen);
-    els.send.addEventListener("click", sendMessage);
-    els.input.addEventListener("keydown", function (e) {
+    bubble.addEventListener("click", toggleOpen);
+    closeBtn.addEventListener("click", toggleOpen);
+    send.addEventListener("click", sendMessage);
+    input.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         sendMessage();
       }
     });
-    els.input.addEventListener("input", function () {
-      els.input.style.height = "auto";
-      els.input.style.height = Math.min(els.input.scrollHeight, 80) + "px";
+    input.addEventListener("input", function () {
+      input.style.height = "auto";
+      input.style.height = Math.min(input.scrollHeight, 96) + "px";
     });
   }
 
   function toggleOpen() {
     isOpen = !isOpen;
     els.window.classList.toggle("cw-open", isOpen);
+    els.root.classList.toggle("cw-is-open", isOpen);
+    els.bubble.setAttribute("aria-label", isOpen ? "Close chat" : "Open chat");
     if (isOpen) {
       if (!hasLoadedWelcome) {
         addMessage("bot", config.welcomeMessage);
+        renderQuickReplies();
         hasLoadedWelcome = true;
       }
-      els.input.focus();
+      setTimeout(function () { els.input.focus(); }, 220);
     }
   }
 
+  function scrollToBottom() {
+    els.messages.scrollTop = els.messages.scrollHeight;
+  }
+
   function addMessage(role, text) {
-    var msg = el("div", {
-      class: "cw-msg " + (role === "user" ? "cw-msg-user" : "cw-msg-bot"),
+    var isUser = role === "user";
+    var bubbleEl = el("div", {
+      class: "cw-msg " + (isUser ? "cw-msg-user" : "cw-msg-bot"),
       text: text,
     });
-    els.messages.appendChild(msg);
-    els.messages.scrollTop = els.messages.scrollHeight;
-    return msg;
+    var row = el("div", { class: "cw-row" + (isUser ? " cw-row-user" : "") },
+      isUser ? [bubbleEl] : [makeAvatar(true), bubbleEl]);
+    els.messages.appendChild(row);
+    scrollToBottom();
+  }
+
+  function renderQuickReplies() {
+    if (!config.quickReplies || !config.quickReplies.length) return;
+    var wrap = el("div", { id: "cw-quick" });
+    config.quickReplies.forEach(function (text) {
+      var chip = el("button", { class: "cw-chip", type: "button", text: text });
+      chip.addEventListener("click", function () {
+        clearQuickReplies();
+        submitText(text);
+      });
+      wrap.appendChild(chip);
+    });
+    els.messages.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  function clearQuickReplies() {
+    var wrap = document.getElementById("cw-quick");
+    if (wrap) wrap.remove();
   }
 
   function showTyping() {
-    var typing = el("div", { class: "cw-msg-typing", id: "cw-typing" });
+    var typing = el("div", { class: "cw-typing" });
     typing.innerHTML = '<span class="cw-dot"></span><span class="cw-dot"></span><span class="cw-dot"></span>';
-    els.messages.appendChild(typing);
-    els.messages.scrollTop = els.messages.scrollHeight;
+    var row = el("div", { class: "cw-row", id: "cw-typing-row" }, [makeAvatar(true), typing]);
+    els.messages.appendChild(row);
+    scrollToBottom();
   }
 
   function hideTyping() {
-    var typing = document.getElementById("cw-typing");
-    if (typing) typing.remove();
+    var row = document.getElementById("cw-typing-row");
+    if (row) row.remove();
   }
 
   function sendMessage() {
@@ -183,6 +335,11 @@
     if (!text) return;
     els.input.value = "";
     els.input.style.height = "auto";
+    clearQuickReplies();
+    submitText(text);
+  }
+
+  function submitText(text) {
     addMessage("user", text);
     els.send.disabled = true;
     showTyping();
@@ -200,6 +357,12 @@
       })
       .then(function (data) {
         hideTyping();
+        // If a human agent has picked up this conversation, swap the
+        // identity shown in the header and on subsequent replies.
+        if (data.agent && data.agent.name) {
+          currentResponder = { name: data.agent.name, avatarUrl: data.agent.avatarUrl || "" };
+          refreshHeaderIdentity();
+        }
         addMessage("bot", data.reply);
       })
       .catch(function (err) {
@@ -221,6 +384,8 @@
         config.botName = data.botName || config.botName;
         config.welcomeMessage = data.welcomeMessage || config.welcomeMessage;
         config.brandColor = data.brandColor || config.brandColor;
+        config.avatarUrl = data.avatarUrl || "";
+        config.quickReplies = Array.isArray(data.quickReplies) ? data.quickReplies : [];
       })
       .catch(function () {
         // fall back to defaults; still render the widget so the site owner

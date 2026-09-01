@@ -6,8 +6,33 @@ const DATA_DIR = path.join(__dirname, "..", "data", "clients");
 const CLIENT_KEY_PREFIX = "chatbot:client:";
 const CLIENT_INDEX_KEY = "chatbot:client-index";
 
+const MAX_QUICK_REPLIES = 4;
+
 function isValidClientId(clientId) {
   return typeof clientId === "string" && /^[a-zA-Z0-9_-]{3,64}$/.test(clientId);
+}
+
+// The widget renders this straight into an <img src>, so only allow real
+// http(s) URLs -- never javascript:/data: URIs.
+function sanitizeAvatarUrl(url) {
+  if (typeof url !== "string" || !url.trim()) return "";
+  try {
+    const parsed = new URL(url.trim());
+    return parsed.protocol === "http:" || parsed.protocol === "https:" ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
+
+// Suggested-question buttons shown under the welcome message so visitors can
+// start a conversation in one tap instead of typing.
+function sanitizeQuickReplies(replies) {
+  if (!Array.isArray(replies)) return [];
+  return replies
+    .filter((r) => typeof r === "string")
+    .map((r) => r.trim().slice(0, 60))
+    .filter(Boolean)
+    .slice(0, MAX_QUICK_REPLIES);
 }
 
 // ---- filesystem backend (local dev, no Redis env vars configured) ----
@@ -83,8 +108,8 @@ async function getClient(clientId) {
 async function getPublicClient(clientId) {
   const client = await getClient(clientId);
   if (!client) return null;
-  const { id, botName, welcomeMessage, brandColor } = client;
-  return { id, botName, welcomeMessage, brandColor };
+  const { id, botName, welcomeMessage, brandColor, avatarUrl, quickReplies } = client;
+  return { id, botName, welcomeMessage, brandColor, avatarUrl, quickReplies };
 }
 
 async function listClients() {
@@ -105,6 +130,14 @@ async function upsertClient(config) {
     businessInfo: config.businessInfo ?? existing.businessInfo ?? "",
     faqs: config.faqs ?? existing.faqs ?? [],
     tone: config.tone ?? existing.tone ?? "friendly and concise",
+    avatarUrl:
+      config.avatarUrl !== undefined
+        ? sanitizeAvatarUrl(config.avatarUrl)
+        : existing.avatarUrl ?? "",
+    quickReplies:
+      config.quickReplies !== undefined
+        ? sanitizeQuickReplies(config.quickReplies)
+        : existing.quickReplies ?? ["Hi!"],
     updatedAt: new Date().toISOString(),
   };
   if (hasRedis) {

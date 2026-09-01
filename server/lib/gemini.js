@@ -21,7 +21,12 @@ function buildSystemPrompt(clientConfig) {
   return [
     `You are ${clientConfig.botName || "the support assistant"}, a helpful chat assistant embedded on ${clientConfig.id}'s website.`,
     `Your job is to answer visitor questions about this business's product/service using ONLY the information below.`,
-    `Tone: ${clientConfig.tone || "friendly and concise"}.`,
+    ``,
+    `=== YOUR PERSONALITY ===`,
+    `Adopt this persona in every reply. It governs HOW you speak (voice, warmth,`,
+    `quirks, what you'd never say). It does NOT override the factual rules below --`,
+    `stay in character, but never invent facts to fit the persona.`,
+    clientConfig.tone || "friendly and concise",
     ``,
     `=== BUSINESS INFO ===`,
     clientConfig.businessInfo || "(no business info provided yet)",

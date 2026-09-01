@@ -49,8 +49,27 @@
     <label for="brandColor">Brand color</label>
     <input type="color" id="brandColor" value="#6366f1" />
 
-    <label for="tone">Tone</label>
-    <input type="text" id="tone" placeholder="friendly and concise" value="friendly and concise" />
+    <label for="avatarUrl">Bot profile picture <small>(optional — paste an image URL; falls back to the bot's initials if left blank)</small></label>
+    <input type="text" id="avatarUrl" placeholder="https://example.com/bot-avatar.png" />
+
+    <label for="tone">Personality <small>(how the bot should speak — write as much as you like: voice, quirks, phrases it uses or avoids, how it handles rude visitors, etc.)</small></label>
+    <textarea id="tone" placeholder="e.g. Warm and a bit playful. Uses casual contractions and the occasional emoji, never corporate jargon. Always greets people by acknowledging their question before answering. If someone's frustrated, apologise once, sincerely, then fix the problem.">friendly and concise</textarea>
+
+    <fieldset>
+      <legend>Quick reply buttons</legend>
+      <p style="margin:0 0 10px;font-size:13px;color:#888;">
+        Shown as tappable buttons under the welcome message, so visitors can start
+        without typing. Leave any blank to skip it.
+      </p>
+      <label for="quickReply1">Button 1</label>
+      <input type="text" id="quickReply1" maxlength="60" value="Hi!" />
+      <label for="quickReply2">Button 2</label>
+      <input type="text" id="quickReply2" maxlength="60" placeholder="What are your hours?" />
+      <label for="quickReply3">Button 3</label>
+      <input type="text" id="quickReply3" maxlength="60" placeholder="How much does it cost?" />
+      <label for="quickReply4">Button 4</label>
+      <input type="text" id="quickReply4" maxlength="60" placeholder="Do you deliver?" />
+    </fieldset>
 
     <label for="crawlUrl">Import from your website <small>(optional — fetches your site and a few linked pages like About/FAQ/Pricing, and fills the box below for you to review)</small></label>
     <div class="faq-row">
@@ -179,14 +198,20 @@
       };
     }).filter(function (f) { return f.question && f.answer; });
 
+    var quickReplies = ["quickReply1", "quickReply2", "quickReply3", "quickReply4"]
+      .map(function (id) { return document.getElementById(id).value.trim(); })
+      .filter(Boolean);
+
     var payload = {
       id: document.getElementById("clientId").value.trim(),
       botName: document.getElementById("botName").value.trim(),
       welcomeMessage: document.getElementById("welcomeMessage").value.trim(),
       brandColor: document.getElementById("brandColor").value,
+      avatarUrl: document.getElementById("avatarUrl").value.trim(),
       tone: document.getElementById("tone").value.trim(),
       businessInfo: document.getElementById("businessInfo").value.trim(),
       faqs: faqs,
+      quickReplies: quickReplies,
     };
 
     fetch("/api/admin/clients", {
