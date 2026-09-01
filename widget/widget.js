@@ -215,10 +215,11 @@
       ".cw-chip:hover{background:" + rgba(brand, 0.08) + ";border-color:" + brand + ";transform:translateY(-1px)}" +
       ".cw-chip:active{transform:translateY(0)}" +
 
-      /* messages tab */
-      "#cw-messages-list{flex:1;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;background:#fff}" +
-      ".cw-conv-row{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:none;border:none;border-radius:12px;padding:11px 8px;cursor:pointer;font-family:inherit;transition:background .15s ease}" +
-      ".cw-conv-row:hover{background:#f7f8fa}" +
+      /* messages tab -- holds the "start new" section (CTA + quick chips) */
+      /* above the past-conversations list, so it shares Home's spacing     */
+      "#cw-messages-list{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:10px;background:#f7f8fa}" +
+      ".cw-conv-row{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:#fff;border:1px solid #e8e9ee;border-radius:14px;padding:11px 12px;cursor:pointer;font-family:inherit;transition:border-color .15s ease,box-shadow .15s ease,transform .12s ease}" +
+      ".cw-conv-row:hover{border-color:" + rgba(brand, 0.5) + ";box-shadow:0 3px 10px rgba(0,0,0,.06);transform:translateY(-1px)}" +
       ".cw-conv-text{flex:1;min-width:0}" +
       ".cw-conv-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}" +
       ".cw-conv-top strong{font-size:14px;color:#1a1c22;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
@@ -226,11 +227,6 @@
       ".cw-conv-preview{font-size:13px;color:#7d808c;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       ".cw-conv-row.cw-unread .cw-conv-preview{color:#2a2c34;font-weight:550}" +
       ".cw-conv-badge{background:" + brand + ";color:" + contrastText(brand) + ";font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0}" +
-      ".cw-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:30px;text-align:center;color:#a3a6b1}" +
-      ".cw-empty svg{width:40px;height:40px;opacity:.5}" +
-      ".cw-empty strong{color:#4a4d59;font-size:14.5px}" +
-      ".cw-empty span{font-size:13px;max-width:220px}" +
-      ".cw-empty button{margin-top:4px}" +
 
       /* faq / help */
       "#cw-faq-list{flex:1;overflow-y:auto;padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;background:#f7f8fa}" +
@@ -502,6 +498,25 @@
     return tile;
   }
 
+  // Shared by Home's "Top questions" preview and Help's full list -- an
+  // expand/collapse accordion, answer shown inline, no conversation started.
+  function renderFaqItems(container, faqs) {
+    faqs.forEach(function (faq) {
+      var q = el("button", { class: "cw-faq-q", type: "button" }, [el("span", { text: faq.question })]);
+      var caret = el("i", { class: "cw-faq-caret" });
+      caret.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>';
+      q.appendChild(caret);
+      var a = el("div", { class: "cw-faq-a", text: faq.answer });
+      var item = el("div", { class: "cw-faq-item" }, [q, a]);
+      q.addEventListener("click", function () { item.classList.toggle("cw-open"); });
+      container.appendChild(item);
+    });
+  }
+
+  var HOME_FAQ_COUNT = 3;
+
+  // Home: quick answers without needing to chat. Just the top few FAQs,
+  // expandable inline, plus a fallback link for anything not covered.
   function buildHome() {
     els.homeList.innerHTML = "";
     els.homeList.appendChild(el("div", { class: "cw-menu-head" }, [
@@ -512,55 +527,58 @@
       ]),
     ]));
 
-    els.homeList.appendChild(actionTile(
-      ICONS.chat, "Send us a message", "Start a new conversation",
-      function () { startNewConversation(); }
-    ));
-
-    if (config.quickReplies && config.quickReplies.length) {
-      els.homeList.appendChild(el("div", { class: "cw-home-subhead", text: "Quick questions" }));
-      var wrap = el("div", { class: "cw-home-quick" });
-      config.quickReplies.forEach(function (q) {
-        var chip = el("button", { class: "cw-chip", type: "button", text: q });
-        chip.addEventListener("click", function () { startNewConversation(q); });
-        wrap.appendChild(chip);
-      });
-      els.homeList.appendChild(wrap);
+    var topFaqs = (config.faqs || []).slice(0, HOME_FAQ_COUNT);
+    if (topFaqs.length) {
+      els.homeList.appendChild(el("div", { class: "cw-home-subhead", text: "Top questions" }));
+      renderFaqItems(els.homeList, topFaqs);
     }
+
+    var cta = el("button", { class: "cw-faq-cta", type: "button", text: "Message us directly →" });
+    cta.addEventListener("click", function () { startNewConversation(); });
+    els.homeList.appendChild(cta);
   }
 
+  // Help: the full FAQ library, same accordion, same "ask a human" fallback.
   function buildFaq() {
     els.faqList.innerHTML = "";
     if (!config.faqs || !config.faqs.length) {
       els.faqList.appendChild(el("div", { class: "cw-faq-empty", text: "No help articles yet -- ask us anything and we'll do our best!" }));
+    } else {
+      renderFaqItems(els.faqList, config.faqs);
     }
-    (config.faqs || []).forEach(function (faq) {
-      var q = el("button", { class: "cw-faq-q", type: "button" }, [el("span", { text: faq.question })]);
-      var caret = el("i", { class: "cw-faq-caret" });
-      caret.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>';
-      q.appendChild(caret);
-      var a = el("div", { class: "cw-faq-a", text: faq.answer });
-      var item = el("div", { class: "cw-faq-item" }, [q, a]);
-      q.addEventListener("click", function () { item.classList.toggle("cw-open"); });
-      els.faqList.appendChild(item);
-    });
 
     var cta = el("button", { class: "cw-faq-cta", type: "button", text: "Still need help? Ask our assistant →" });
     cta.addEventListener("click", function () { startNewConversation(); });
     els.faqList.appendChild(cta);
   }
 
+  // Messages: where a visitor actually starts or continues talking -- the
+  // "Send us a message" CTA and quick-question starters live here (moved
+  // off Home, which is now purely the quick-answers screen above), followed
+  // by their past conversations.
   function renderMessagesList() {
     els.messagesList.innerHTML = "";
+
+    els.messagesList.appendChild(actionTile(
+      ICONS.chat, "Send us a message", "Start a new conversation",
+      function () { startNewConversation(); }
+    ));
+
+    if (config.quickReplies && config.quickReplies.length) {
+      els.messagesList.appendChild(el("div", { class: "cw-home-subhead", text: "Quick questions" }));
+      var wrap = el("div", { class: "cw-home-quick" });
+      config.quickReplies.forEach(function (q) {
+        var chip = el("button", { class: "cw-chip", type: "button", text: q });
+        chip.addEventListener("click", function () { startNewConversation(q); });
+        wrap.appendChild(chip);
+      });
+      els.messagesList.appendChild(wrap);
+    }
+
+    els.messagesList.appendChild(el("div", { class: "cw-home-subhead", text: "Past conversations" }));
+
     if (!conversationsCache.length) {
-      var empty = el("div", { class: "cw-empty" });
-      empty.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + ICONS.chat + "</svg>";
-      empty.appendChild(el("strong", { text: "No conversations yet" }));
-      empty.appendChild(el("span", { text: "Start a new conversation and it'll show up here." }));
-      var cta = el("button", { class: "cw-chip", type: "button", text: "Send us a message" });
-      cta.addEventListener("click", function () { startNewConversation(); });
-      empty.appendChild(cta);
-      els.messagesList.appendChild(empty);
+      els.messagesList.appendChild(el("div", { class: "cw-faq-empty", text: "No conversations yet." }));
       return;
     }
 

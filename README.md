@@ -50,10 +50,11 @@ any website; each business gets its own knowledge base (product info + FAQs).
     still win, so a persona can't talk the bot into inventing facts.
   - **Quick reply buttons** (`quickReplies`) — up to 4 suggested questions,
     always exactly 4 (blank slots fall back to defaults, see
-    `sanitizeQuickReplies`). Rendered on the Home tab (see below) as
+    `sanitizeQuickReplies`). Rendered on the Messages tab (see below) as
     conversation-starter chips.
-  - **FAQs** now do double duty: they still go into the AI's prompt, and the
-    widget also renders them as a browsable Help tab (see below).
+  - **FAQs** now do triple duty: they go into the AI's prompt, the widget
+    shows the top 3 as an inline preview on Home, and the full list as a
+    browsable Help tab (see below).
 - `public/demo.html` — a stand-in customer website with the widget embedded,
   for end-to-end testing.
 - `server/data/clients/*.json` — one JSON file per business (their knowledge
@@ -84,18 +85,24 @@ automatically:
 A bottom tab bar with three peer tabs, plus a conversation view reached by
 drilling into either of them:
 
-- **Home** — the default landing screen. A "Send us a message" tile always
-  starts a brand-new conversation; the quick-reply questions below it do the
-  same but also send that question immediately, as the conversation's first
-  message.
-- **Messages** — every past conversation this visitor has had, most recent
-  first, with a preview of the last message and a red unread-count badge
-  (on both the tab icon and the individual row) for any conversation with
-  activity the visitor hasn't seen yet. Tapping one reopens its full
-  transcript.
-- **Help** — the client's FAQs as a tap-to-expand list, ending in a "Still
-  need help? Ask our assistant →" link that starts a new conversation. Tile
-  hidden entirely when a client has no FAQs.
+- **Home** — quick answers without needing to chat: the bot's greeting plus
+  its top 3 FAQs (`HOME_FAQ_COUNT` in `widget.js`) as an inline
+  expand/collapse accordion — tapping one shows the answer right there, no
+  conversation started, no navigation. Ends in a "Message us directly →"
+  fallback link for anything not covered. The "Top questions" header (and
+  the whole section) is omitted for a client with no FAQs configured, but
+  the fallback link always stays so Home is never a dead end.
+- **Messages** — where a visitor actually starts or continues talking. A
+  "Send us a message" tile and the client's quick-reply chips (tapping one
+  starts a new conversation and sends that question as its first message)
+  sit above a "Past conversations" list: every conversation this visitor
+  has had, most recent first, with a preview of the last message and a red
+  unread-count badge (on both the tab icon and the individual row) for
+  anything with activity the visitor hasn't seen yet. Tapping a past
+  conversation reopens its full transcript.
+- **Help** — the client's *full* FAQ list, same accordion as Home's preview,
+  ending in the same "Still need help? Ask our assistant →" fallback.
+  Whatever doesn't fit in Home's top-3 lives here.
 - **An open conversation** is a fourth, "pushed" view — the tab bar hides
   and a back arrow takes its place in the header, returning to whichever
   tab it was opened from (tracked separately per conversation, so opening
