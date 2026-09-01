@@ -527,9 +527,10 @@
       ]),
     ]));
 
-    var cta = el("button", { class: "cw-faq-cta", type: "button", text: "Message us directly →" });
-    cta.addEventListener("click", function () { startNewConversation(); });
-    els.homeList.appendChild(cta);
+    els.homeList.appendChild(actionTile(
+      ICONS.chat, "Message us directly", "Start a new conversation",
+      function () { startNewConversation(); }
+    ));
 
     var topFaqs = (config.faqs || []).slice(0, HOME_FAQ_COUNT);
     if (topFaqs.length) {
