@@ -1,12 +1,19 @@
+const crypto = require("crypto");
 const { redis, hasRedis } = require("./store");
 
-// One conversation between a visitor and either the AI bot or a human agent
-// who has taken over. Replaces the old history-only store: alongside the
-// message log this now tracks *who* is answering, so a human can step in.
+// One conversation ("session") between a visitor and either the AI bot or a
+// human agent who has taken over. A visitor can have several of these --
+// the widget's Home tab starts a new one, the Messages tab lists past ones
+// -- all grouped under a stable `visitorId` (see identity.js): either a
+// verified logged-in user, or an anonymous per-device id the widget itself
+// generates. That grouping is a separate index (visitor -> [conversation
+// ids]) from the existing per-client index (client -> [conversation ids])
+// that the agent dashboard uses to see every conversation regardless of
+// who started it.
 //
 // Session shape:
 //   {
-//     id, clientId,
+//     id, clientId, visitorId,
 //     seq,                       // monotonic counter, never reset by trimming
 //     agent: null | { name, avatarUrl },
 //     messages: [ { seq, ts, role, content, sender? } ],
@@ -20,6 +27,7 @@ const { redis, hasRedis } = require("./store");
 const MAX_MESSAGES = 60; // retained for agent context / visitor reloads
 const LLM_MAX_MESSAGES = 20; // what we actually feed the model (10 turns)
 const MAX_LISTED_SESSIONS = 100;
+const MAX_LISTED_CONVERSATIONS = 50; // per visitor, in the Messages tab
 
 // How long a conversation sticks around after its last message. Expiry is
 // sliding -- every write pushes it out again -- so this is "idle for N days",
@@ -30,20 +38,32 @@ const SESSION_TTL_SECONDS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60;
 
 const SESSION_KEY = "chatbot:session:";
 const CLIENT_SESSIONS_KEY = "chatbot:client-sessions:";
+const VISITOR_CONVERSATIONS_KEY = "chatbot:visitor-conversations:";
 
 function isValidSessionId(sessionId) {
   return typeof sessionId === "string" && /^[a-zA-Z0-9_-]{8,128}$/.test(sessionId);
 }
 
-function newSession(sessionId, clientId) {
+// A visitorId is either the widget's own random per-device id or a verified
+// user id from identity.js -- both are plain opaque strings, same shape.
+function isValidVisitorId(visitorId) {
+  return typeof visitorId === "string" && /^[a-zA-Z0-9_-]{8,160}$/.test(visitorId);
+}
+
+function newSession(sessionId, clientId, visitorId) {
   return {
     id: sessionId,
     clientId: clientId,
+    visitorId: visitorId || null,
     seq: 0,
     agent: null,
     messages: [],
     updatedAt: Date.now(),
   };
+}
+
+function visitorKey(clientId, visitorId) {
+  return VISITOR_CONVERSATIONS_KEY + clientId + ":" + visitorId;
 }
 
 // ---- in-memory backend (local dev without Redis) ----
@@ -72,11 +92,16 @@ async function saveSession(session) {
   session.updatedAt = Date.now();
   if (hasRedis) {
     await redis.set(SESSION_KEY + session.id, session, { ex: SESSION_TTL_SECONDS });
+    const expiredBefore = Date.now() - SESSION_TTL_SECONDS * 1000;
     if (session.clientId) {
       const indexKey = CLIENT_SESSIONS_KEY + session.clientId;
       await redis.zadd(indexKey, { score: session.updatedAt, member: session.id });
-      // drop index entries for sessions that have already expired
-      await redis.zremrangebyscore(indexKey, 0, Date.now() - SESSION_TTL_SECONDS * 1000);
+      await redis.zremrangebyscore(indexKey, 0, expiredBefore);
+    }
+    if (session.clientId && session.visitorId) {
+      const vKey = visitorKey(session.clientId, session.visitorId);
+      await redis.zadd(vKey, { score: session.updatedAt, member: session.id });
+      await redis.zremrangebyscore(vKey, 0, expiredBefore);
     }
   } else {
     memSessions.set(session.id, session);
@@ -88,6 +113,20 @@ async function getOrCreateSession(sessionId, clientId) {
   const existing = await getSession(sessionId);
   if (existing) return existing;
   return newSession(sessionId, clientId);
+}
+
+// Starts a brand new conversation for a visitor -- what the widget's Home
+// tab "Send us a message" button, or tapping a quick-reply there, does.
+// Distinct from getOrCreateSession: that resumes a specific known
+// conversation, this always mints a fresh one and registers it under the
+// visitor so it shows up in their Messages tab.
+async function createConversation(clientId, visitorId) {
+  if (!isValidVisitorId(visitorId)) {
+    throw new Error("A valid visitorId is required to start a conversation");
+  }
+  const session = newSession(crypto.randomUUID(), clientId, visitorId);
+  await saveSession(session);
+  return session;
 }
 
 // ---- messages ----
@@ -175,10 +214,51 @@ async function listSessions(clientId) {
   });
 }
 
+function summarize(session) {
+  const last = session.messages[session.messages.length - 1];
+  return {
+    id: session.id,
+    clientId: session.clientId,
+    agent: session.agent,
+    seq: session.seq,
+    messageCount: session.messages.length,
+    updatedAt: session.updatedAt,
+    lastMessage: last
+      ? { role: last.role, content: last.content.slice(0, 120), sender: last.sender || null }
+      : null,
+  };
+}
+
+// Every conversation a specific visitor has had with this client, most
+// recently active first -- what the widget's Messages tab renders. `seq` on
+// each summary is what the widget diffs against its locally-stored
+// last-read seq to compute the unread badge (see widget.js); read state
+// itself isn't tracked server-side, so it's per-browser even for a verified
+// cross-device visitor.
+async function listVisitorConversations(clientId, visitorId) {
+  if (!isValidVisitorId(visitorId)) return [];
+  let ids;
+  if (hasRedis) {
+    ids = (await redis.zrange(visitorKey(clientId, visitorId), 0, -1)) || [];
+    ids = ids.reverse();
+  } else {
+    memPrune();
+    ids = Array.from(memSessions.values())
+      .filter((s) => s.clientId === clientId && s.visitorId === visitorId)
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .map((s) => s.id);
+  }
+  ids = ids.slice(0, MAX_LISTED_CONVERSATIONS);
+  const sessions = await Promise.all(ids.map((id) => getSession(id)));
+  return sessions.filter(Boolean).map(summarize);
+}
+
 module.exports = {
   isValidSessionId,
+  isValidVisitorId,
   getSession,
   getOrCreateSession,
+  createConversation,
   saveSession,
   appendMessage,
   toLlmHistory,
@@ -186,4 +266,5 @@ module.exports = {
   assignAgent,
   releaseAgent,
   listSessions,
+  listVisitorConversations,
 };

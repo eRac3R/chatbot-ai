@@ -4,11 +4,13 @@ const { getClient, getPublicClient } = require("../lib/clients");
 const { getChatReply } = require("../lib/gemini");
 const {
   isValidSessionId,
+  isValidVisitorId,
   getSession,
-  getOrCreateSession,
+  createConversation,
   appendMessage,
   toLlmHistory,
   messagesSince,
+  listVisitorConversations,
 } = require("../lib/sessions");
 const { resolveSessionId } = require("../lib/identity");
 
@@ -37,12 +39,14 @@ router.get("/clients/:id/public", async (req, res) => {
   res.json(config);
 });
 
-// The widget calls this once on load to find out which conversation it's
-// looking at. With a verified logged-in user that's their cross-device
-// session; otherwise it's the anonymous id from their browser storage.
-router.post("/session/resolve", async (req, res) => {
-  const { clientId, userId, userHash } = req.body || {};
-  let { sessionId } = req.body || {};
+// The widget calls this once on load to find out which VISITOR it is --
+// not which conversation. A visitor can have many conversations (Home tab
+// starts a new one, Messages tab lists past ones); this just answers "which
+// bucket do they all belong to". With a verified logged-in user that's their
+// cross-device identity; otherwise it's the anonymous per-device id the
+// widget generated and stored itself.
+router.post("/visitor/resolve", async (req, res) => {
+  const { clientId, userId, userHash, anonymousVisitorId } = req.body || {};
 
   if (typeof clientId !== "string") {
     return res.status(400).json({ error: "clientId is required" });
@@ -50,15 +54,50 @@ router.post("/session/resolve", async (req, res) => {
   const clientConfig = await getClient(clientId);
   if (!clientConfig) return res.status(404).json({ error: "Unknown client id" });
 
-  if (!isValidSessionId(sessionId)) sessionId = crypto.randomUUID();
+  const fallback = isValidVisitorId(anonymousVisitorId)
+    ? anonymousVisitorId
+    : crypto.randomUUID();
 
   const resolved = resolveSessionId({
     clientConfig,
     userId,
     userHash,
-    anonymousSessionId: sessionId,
+    anonymousSessionId: fallback,
   });
-  res.json({ sessionId: resolved.sessionId, identified: resolved.identified });
+  res.json({ visitorId: resolved.sessionId, identified: resolved.identified });
+});
+
+// Starts a brand-new conversation for a visitor: the widget's Home tab
+// "Send us a message" button, and tapping a quick-question there, both call
+// this rather than reusing an existing conversation.
+router.post("/conversations", async (req, res) => {
+  const { clientId, visitorId } = req.body || {};
+  if (typeof clientId !== "string") {
+    return res.status(400).json({ error: "clientId is required" });
+  }
+  const clientConfig = await getClient(clientId);
+  if (!clientConfig) return res.status(404).json({ error: "Unknown client id" });
+
+  try {
+    const session = await createConversation(clientId, visitorId);
+    res.json({ sessionId: session.id, seq: session.seq, agent: session.agent });
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+// The widget's Messages tab: every conversation this visitor has had with
+// this client, most recent first. Each entry's `seq` is what the widget
+// diffs against its own locally-stored last-read value to badge unread
+// conversations -- see the comment on listVisitorConversations for why that
+// read state lives client-side rather than being tracked here.
+router.get("/visitors/:visitorId/conversations", async (req, res) => {
+  const { visitorId } = req.params;
+  const { clientId } = req.query;
+  if (typeof clientId !== "string") {
+    return res.status(400).json({ error: "clientId query param is required" });
+  }
+  res.json({ conversations: await listVisitorConversations(clientId, visitorId) });
 });
 
 // The widget polls this while it's open, to pick up messages it didn't get
@@ -66,8 +105,8 @@ router.post("/session/resolve", async (req, res) => {
 // and the existing transcript after a page reload.
 //
 // The sessionId is itself the secret (an unguessable UUID minted per
-// visitor); clientId is checked as defence in depth so a leaked id can't be
-// read across clients.
+// conversation); clientId is checked as defence in depth so a leaked id
+// can't be read across clients.
 router.get("/sessions/:sessionId/messages", async (req, res) => {
   const { sessionId } = req.params;
   const { clientId, since } = req.query;
@@ -91,8 +130,7 @@ router.get("/sessions/:sessionId/messages", async (req, res) => {
 });
 
 router.post("/chat", async (req, res) => {
-  const { clientId, message } = req.body || {};
-  let { sessionId } = req.body || {};
+  const { clientId, sessionId, message } = req.body || {};
 
   if (typeof clientId !== "string" || typeof message !== "string" || !message.trim()) {
     return res.status(400).json({ error: "clientId and message are required" });
@@ -100,13 +138,18 @@ router.post("/chat", async (req, res) => {
   if (message.length > 2000) {
     return res.status(400).json({ error: "message is too long" });
   }
-  if (!isValidSessionId(sessionId)) {
-    sessionId = crypto.randomUUID();
-  }
 
   const clientConfig = await getClient(clientId);
   if (!clientConfig) {
     return res.status(404).json({ error: "Unknown client id" });
+  }
+
+  // Conversations are created explicitly via POST /api/conversations (so
+  // they get registered under a visitor); this endpoint answers within one,
+  // it doesn't mint one on the fly.
+  const session = await getSession(sessionId);
+  if (!session || session.clientId !== clientId) {
+    return res.status(404).json({ error: "Unknown conversation. Start one via POST /api/conversations." });
   }
 
   if (isRateLimited(sessionId)) {
@@ -114,7 +157,6 @@ router.post("/chat", async (req, res) => {
   }
 
   try {
-    const session = await getOrCreateSession(sessionId, clientId);
     const userMessage = await appendMessage(session, { role: "user", content: message });
 
     // A human agent has taken this conversation over -- record the visitor's

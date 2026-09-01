@@ -8,9 +8,8 @@ any website; each business gets its own knowledge base (product info + FAQs).
 
 - `server/` — Express backend. Multi-tenant: every business ("client") has a
   config file with their product info, FAQs, tone, and branding. Exposes:
-  - `POST /api/chat` — the widget calls this to get a reply.
   - `GET /api/clients/:id/public` — public, non-sensitive widget config (bot
-    name, welcome message, brand color).
+    name, welcome message, brand color, FAQs, quick replies).
   - `POST/GET/DELETE /api/admin/clients` — create/update/list/delete a
     client's knowledge base. Protected by the `ADMIN_KEY` header.
   - `POST /api/admin/crawl` — fetches a business's website (start page + a
@@ -19,10 +18,19 @@ any website; each business gets its own knowledge base (product info + FAQs).
   - `POST /api/admin/extract-pdf` — extracts text from an uploaded PDF
     (product brochure, spec sheet, price list, etc.) to pre-fill
     `businessInfo`. Also protected by `ADMIN_KEY`.
+  - `POST /api/visitor/resolve` — which visitor this browser is (not which
+    conversation — see Widget navigation below). Verified identity if
+    `userId`/`userHash` check out, otherwise the anonymous per-device id.
+  - `POST /api/conversations` — starts a new conversation for a visitor.
+  - `GET /api/visitors/:visitorId/conversations?clientId=…` — that
+    visitor's conversations, most recent first (the widget's Messages tab).
+  - `POST /api/chat` — send a message in an existing conversation (404s if
+    the conversation doesn't exist — see Widget navigation).
   - `GET /api/sessions/:sessionId/messages?clientId=…&since=…` — what the
-    widget polls while it's open, to pick up agent messages and to restore
-    the transcript after a page reload. The unguessable `sessionId` is the
-    credential here; `clientId` is checked as defence in depth.
+    widget polls while a conversation is open, to pick up agent messages and
+    to restore the transcript after a page reload. The unguessable
+    `sessionId` is the credential here; `clientId` is checked as defence in
+    depth.
   - Live-agent endpoints (see below), all under `/api/admin/sessions`.
 
 - `widget/widget.js` — the embeddable script. Vanilla JS, no dependencies, no
@@ -40,26 +48,12 @@ any website; each business gets its own knowledge base (product info + FAQs).
     phrases to use or avoid, how to handle a frustrated visitor. It shapes
     *how* the bot speaks; the factual "only use the business info" rules
     still win, so a persona can't talk the bot into inventing facts.
-  - **Quick reply buttons** (`quickReplies`) — up to 4 suggested questions
-    rendered as tappable chips under the welcome message, so visitors can
-    start without typing. They disappear once the visitor sends anything.
+  - **Quick reply buttons** (`quickReplies`) — up to 4 suggested questions,
+    always exactly 4 (blank slots fall back to defaults, see
+    `sanitizeQuickReplies`). Rendered on the Home tab (see below) as
+    conversation-starter chips.
   - **FAQs** now do double duty: they still go into the AI's prompt, and the
-    widget also renders them as a browsable tab (see below).
-
-### Widget navigation
-
-The widget opens straight into the chat. A back arrow in the header goes up
-to a menu, from which the visitor can pick:
-
-- **Chat with us** — back into the AI conversation, exactly where they left
-  it. Views are hidden rather than rebuilt, so the transcript, scroll
-  position and any in-flight reply all survive navigating away and back.
-- **FAQs** — the client's configured FAQs as a tap-to-expand list, with a
-  "Still need help? Ask our assistant →" link so it's a shortcut rather than
-  a dead end. The tile is hidden entirely when a client has no FAQs.
-
-Adding another tab means one `menuTile(...)` call plus a view container in
-`widget.js` — the view switcher is generic.
+    widget also renders them as a browsable Help tab (see below).
 - `public/demo.html` — a stand-in customer website with the widget embedded,
   for end-to-end testing.
 - `server/data/clients/*.json` — one JSON file per business (their knowledge
@@ -85,17 +79,57 @@ automatically:
   layer) won't extract anything — you'd need to retype that content or paste
   it manually.
 
+### Widget navigation
+
+A bottom tab bar with three peer tabs, plus a conversation view reached by
+drilling into either of them:
+
+- **Home** — the default landing screen. A "Send us a message" tile always
+  starts a brand-new conversation; the quick-reply questions below it do the
+  same but also send that question immediately, as the conversation's first
+  message.
+- **Messages** — every past conversation this visitor has had, most recent
+  first, with a preview of the last message and a red unread-count badge
+  (on both the tab icon and the individual row) for any conversation with
+  activity the visitor hasn't seen yet. Tapping one reopens its full
+  transcript.
+- **Help** — the client's FAQs as a tap-to-expand list, ending in a "Still
+  need help? Ask our assistant →" link that starts a new conversation. Tile
+  hidden entirely when a client has no FAQs.
+- **An open conversation** is a fourth, "pushed" view — the tab bar hides
+  and a back arrow takes its place in the header, returning to whichever
+  tab it was opened from (tracked separately per conversation, so opening
+  one from Home vs. Messages returns to the right place).
+
+A visitor can have **many conversations**, not just one — this is the real
+architectural change from earlier versions, where a visitor had exactly one
+ongoing session. Conversations are grouped under a stable `visitorId` (see
+Chat history below): `POST /api/conversations` mints a new one,
+`GET /api/visitors/:visitorId/conversations` lists them all. `POST
+/api/chat` now requires an existing conversation (404s otherwise) rather
+than silently creating one, since a conversation has to be registered under
+a visitor to show up in their Messages tab.
+
+**Unread tracking is client-side only** (localStorage, per browser) — the
+server doesn't record what a visitor has "read". A verified cross-device
+visitor's badge count is therefore per-device: reading a message on their
+laptop doesn't clear the badge on their phone. Fixing that would mean
+syncing read-state through the server too; not done, flagged here rather
+than silently left as a surprise.
+
 ### Chat history and cross-device continuity
 
-By default a visitor's conversation is stored server-side against a random id
-kept in their browser's `localStorage`, so it survives reloads and closing
-the widget, and is restored when they come back. Retention is **1 day of
-inactivity** by default (`SESSION_TTL_DAYS`), sliding — every new message
-pushes the expiry out again.
+By default a visitor is identified by a random id kept in their browser's
+`localStorage` (see Widget navigation above for how one visitor can have
+several conversations under that id). Each individual conversation survives
+reloads and closing the widget, and is restored when they come back.
+Retention is **1 day of inactivity** per conversation by default
+(`SESSION_TTL_DAYS`), sliding — every new message pushes that conversation's
+expiry out again.
 
-That's per-browser by nature. To let one person's history follow them from
-laptop to phone, the embedding site tells the widget who its logged-in user
-is:
+That visitor id is per-browser by nature. To let one person's conversations
+follow them from laptop to phone, the embedding site tells the widget who
+its logged-in user is:
 
 ```html
 <script src="https://YOUR-DOMAIN/widget.js"
@@ -119,22 +153,26 @@ const userHash = require("crypto")
 ```
 
 Behaviour, all verified end to end:
-- **Valid hash** → the visitor gets a stable session derived from that user,
-  identical on every device, with full history and conversational context.
-- **Missing or wrong hash** → falls back to the anonymous per-device session
-  and logs a console warning. A misconfigured site loses history continuity;
-  it doesn't break the chat and it never exposes the real user's transcript.
-- **Logged out** → back to the anonymous session for that browser. The
-  logged-in history is untouched server-side and returns on next login; the
-  logged-out thread never shows it.
+- **Valid hash** → the visitor gets a stable id derived from that user,
+  identical on every device, with the same conversations and Messages tab.
+- **Missing or wrong hash** → falls back to the anonymous per-device visitor
+  id and logs a console warning. A misconfigured site loses history
+  continuity; it doesn't break the chat and it never exposes the real
+  user's conversations.
+- **Logged out** → back to the anonymous visitor id for that browser. The
+  logged-in visitor's conversations are untouched server-side and return on
+  next login; the logged-out visitor never sees them.
 
-The user session id is itself an HMAC of `identitySecret`, not a plain hash
-of `clientId + userId`. That matters: session ids are treated as bearer
-credentials elsewhere in the API, so a guessable one would let anyone who
-knows a victim's email read their chat without ever passing verification.
+The verified visitor id is itself an HMAC of `identitySecret`, not a plain
+hash of `clientId + userId`. That matters: it's treated as a bearer
+credential elsewhere in the API (it's what `/api/conversations` and
+`/api/visitors/:id/conversations` trust to scope a visitor to their own
+conversations), so a guessable one would let anyone who knows a victim's
+email enumerate their conversations without ever passing verification.
 
-Not implemented: merging an anonymous conversation into the user's history
-when they log in mid-chat. Today that starts a fresh logged-in thread.
+Not implemented: merging an anonymous visitor's conversations into their
+account when they log in mid-session. Today those stay two separate
+visitor buckets.
 
 ### Live agent handoff
 

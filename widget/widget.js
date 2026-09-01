@@ -20,19 +20,21 @@
   }
 
   var API_BASE = new URL(currentScript.src).origin;
-  var STORAGE_KEY = "chatwidget_session_" + clientId;
+  var STORAGE_KEY = "chatwidget_session_" + clientId; // holds the VISITOR id (see below)
+  var READ_STATE_KEY = "chatwidget_read_" + clientId;
 
   // Optional: if the embedding site has its own logged-in users, it can pass
   // the user's id plus an HMAC of it (signed server-side with the client's
-  // identitySecret) so that person's history follows them across devices.
-  // Without these, history is anonymous and per-browser as usual.
+  // identitySecret) so that person's conversations follow them across
+  // devices. Without these, a visitor is identified anonymously and
+  // per-browser as usual.
   var userId = currentScript.getAttribute("data-user-id") || "";
   var userHash = currentScript.getAttribute("data-user-hash") || "";
 
-  // Anonymous per-device id, used when nobody is logged in -- and kept
-  // untouched while they are, so logging out returns them to their own
-  // anonymous thread rather than leaking the logged-in one.
-  function getAnonymousSessionId() {
+  // A visitor can have several conversations (Home starts new ones, Messages
+  // lists past ones) -- visitorId is the stable bucket they all live under,
+  // separate from any single conversation's id.
+  function getAnonymousVisitorId() {
     try {
       var id = window.localStorage.getItem(STORAGE_KEY);
       if (!id) {
@@ -45,7 +47,7 @@
     }
   }
 
-  var sessionId = getAnonymousSessionId();
+  var visitorId = getAnonymousVisitorId();
   var config = {
     botName: "Assistant",
     welcomeMessage: "Hi! How can I help?",
@@ -55,22 +57,52 @@
     faqs: [],
   };
 
-  // Who the visitor is currently talking to. Defaults to the AI bot; if the
-  // server ever reports a human agent has joined (reply payload's `agent`
-  // field), this swaps to their name/photo for the header and all subsequent
-  // messages.
+  // Who the visitor is currently talking to in the OPEN conversation.
+  // Defaults to the AI bot; if the server reports a human agent has joined
+  // (reply/poll payload's `agent` field), this swaps to their name/photo.
   var currentResponder = null;
 
   var els = {};
   var isOpen = false;
-  var hasLoadedWelcome = false;
+  var currentView = "home"; // home | messages | faq | chat
+  var currentConversationId = null; // set only while view === "chat"
 
-  // Everything up to this sequence number is already on screen. Polling asks
-  // only for what's newer, so nothing gets rendered twice.
+  // Everything up to this sequence number is already on screen for the open
+  // conversation. Polling asks only for what's newer, so nothing renders twice.
   var lastSeq = 0;
   var pollTimer = null;
   var sendInFlight = false;
   var POLL_INTERVAL_MS = 4000;
+
+  // The visitor's past conversations (Messages tab) and how far into each
+  // they've actually looked -- the latter purely client-side (localStorage),
+  // so the unread badge is per-browser even for a cross-device identified
+  // visitor. See sessions.js's listVisitorConversations for the server side.
+  var conversationsCache = [];
+  var readState = loadReadState();
+
+  function loadReadState() {
+    try {
+      var raw = window.localStorage.getItem(READ_STATE_KEY);
+      return raw ? JSON.parse(raw) : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveReadState() {
+    try {
+      window.localStorage.setItem(READ_STATE_KEY, JSON.stringify(readState));
+    } catch (e) { /* storage unavailable/full; badge just won't persist */ }
+  }
+
+  function markRead(conversationId, seq) {
+    if (!conversationId || typeof seq !== "number") return;
+    if ((readState[conversationId] || 0) >= seq) return;
+    readState[conversationId] = seq;
+    saveReadState();
+    updateBadge();
+  }
 
   // ---- small color helpers, so the widget adapts to any brand color ----
 
@@ -115,6 +147,15 @@
     return parts.map(function (p) { return p.charAt(0).toUpperCase(); }).join("");
   }
 
+  function relativeTime(ts) {
+    var diffMin = Math.floor((Date.now() - ts) / 60000);
+    if (diffMin < 1) return "just now";
+    if (diffMin < 60) return diffMin + "m ago";
+    var diffHr = Math.floor(diffMin / 60);
+    if (diffHr < 24) return diffHr + "h ago";
+    return Math.floor(diffHr / 24) + "d ago";
+  }
+
   function injectStyles(brand) {
     var onBrand = contrastText(brand);
     var style = document.createElement("style");
@@ -130,7 +171,7 @@
       "#cw-root:not(.cw-is-open) #cw-bubble svg.cw-ico-close{display:none}" +
 
       /* window */
-      "#cw-window{position:fixed;bottom:92px;right:20px;width:380px;max-width:calc(100vw - 32px);height:560px;max-height:calc(100vh - 130px);background:#fff;border-radius:20px;box-shadow:0 16px 48px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);display:flex;flex-direction:column;overflow:hidden;opacity:0;transform:translateY(12px) scale(.97);pointer-events:none;transition:opacity .22s ease,transform .22s cubic-bezier(.34,1.3,.64,1)}" +
+      "#cw-window{position:fixed;bottom:92px;right:20px;width:380px;max-width:calc(100vw - 32px);height:580px;max-height:calc(100vh - 130px);background:#fff;border-radius:20px;box-shadow:0 16px 48px rgba(0,0,0,.18),0 2px 8px rgba(0,0,0,.08);display:flex;flex-direction:column;overflow:hidden;opacity:0;transform:translateY(12px) scale(.97);pointer-events:none;transition:opacity .22s ease,transform .22s cubic-bezier(.34,1.3,.64,1)}" +
       "#cw-window.cw-open{opacity:1;transform:translateY(0) scale(1);pointer-events:auto}" +
 
       /* header */
@@ -145,16 +186,16 @@
       "#cw-back:hover{background:rgba(255,255,255,.3)}" +
       "#cw-back svg{width:17px;height:17px}" +
       "#cw-root.cw-has-back #cw-back{display:flex}" +
-      /* on the menu the avatar lives in the body instead, so the header stays light */
-      "#cw-window.cw-on-menu #cw-header .cw-avatar{display:none}" +
+      /* outside an open conversation the avatar lives in the body instead, so the header stays plain */
+      "#cw-window:not(.cw-view-chat) #cw-header .cw-avatar{display:none}" +
 
       /* view switching */
       ".cw-view{display:none;flex:1;flex-direction:column;min-height:0}" +
       ".cw-view.cw-active{display:flex}" +
 
-      /* menu */
-      "#cw-menu-list{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:10px;background:#f7f8fa}" +
-      ".cw-menu-head{display:flex;align-items:center;gap:12px;padding:4px 2px 12px}" +
+      /* home */
+      "#cw-home-list{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:10px;background:#f7f8fa}" +
+      ".cw-menu-head{display:flex;align-items:center;gap:12px;padding:4px 2px 14px}" +
       ".cw-menu-head strong{display:block;font-size:15.5px;color:#1a1c22}" +
       ".cw-menu-head span{display:block;font-size:12.5px;color:#8a8d99;margin-top:1px}" +
       ".cw-tile{display:flex;align-items:center;gap:13px;width:100%;text-align:left;background:#fff;border:1px solid #e8e9ee;border-radius:14px;padding:14px;cursor:pointer;font-family:inherit;transition:border-color .15s ease,box-shadow .15s ease,transform .12s ease}" +
@@ -166,11 +207,35 @@
       ".cw-tile-text span{display:block;font-size:12.5px;color:#8a8d99;margin-top:2px}" +
       ".cw-tile-chev{color:#c2c5cf;display:flex;flex-shrink:0}" +
       ".cw-tile-chev svg{width:17px;height:17px}" +
+      ".cw-home-subhead{font-size:12.5px;font-weight:650;color:#8a8d99;text-transform:uppercase;letter-spacing:.03em;margin:10px 2px 0}" +
+      ".cw-home-quick{display:flex;flex-wrap:wrap;gap:7px}" +
 
-      /* faq */
+      /* quick-question chips (Home) */
+      ".cw-chip{background:#fff;border:1.5px solid " + rgba(brand, 0.35) + ";color:" + shade(brand, -0.25) + ";padding:8px 14px;border-radius:16px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease;line-height:1.3}" +
+      ".cw-chip:hover{background:" + rgba(brand, 0.08) + ";border-color:" + brand + ";transform:translateY(-1px)}" +
+      ".cw-chip:active{transform:translateY(0)}" +
+
+      /* messages tab */
+      "#cw-messages-list{flex:1;overflow-y:auto;padding:8px 10px;display:flex;flex-direction:column;background:#fff}" +
+      ".cw-conv-row{display:flex;align-items:center;gap:11px;width:100%;text-align:left;background:none;border:none;border-radius:12px;padding:11px 8px;cursor:pointer;font-family:inherit;transition:background .15s ease}" +
+      ".cw-conv-row:hover{background:#f7f8fa}" +
+      ".cw-conv-text{flex:1;min-width:0}" +
+      ".cw-conv-top{display:flex;align-items:baseline;justify-content:space-between;gap:8px}" +
+      ".cw-conv-top strong{font-size:14px;color:#1a1c22;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      ".cw-conv-time{font-size:11.5px;color:#a3a6b1;flex-shrink:0}" +
+      ".cw-conv-preview{font-size:13px;color:#7d808c;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
+      ".cw-conv-row.cw-unread .cw-conv-preview{color:#2a2c34;font-weight:550}" +
+      ".cw-conv-badge{background:" + brand + ";color:" + contrastText(brand) + ";font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0}" +
+      ".cw-empty{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:30px;text-align:center;color:#a3a6b1}" +
+      ".cw-empty svg{width:40px;height:40px;opacity:.5}" +
+      ".cw-empty strong{color:#4a4d59;font-size:14.5px}" +
+      ".cw-empty span{font-size:13px;max-width:220px}" +
+      ".cw-empty button{margin-top:4px}" +
+
+      /* faq / help */
       "#cw-faq-list{flex:1;overflow-y:auto;padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;background:#f7f8fa}" +
-      "#cw-faq-list::-webkit-scrollbar,#cw-menu-list::-webkit-scrollbar{width:6px}" +
-      "#cw-faq-list::-webkit-scrollbar-thumb,#cw-menu-list::-webkit-scrollbar-thumb{background:#d4d6dd;border-radius:3px}" +
+      "#cw-faq-list::-webkit-scrollbar,#cw-home-list::-webkit-scrollbar,#cw-messages-list::-webkit-scrollbar{width:6px}" +
+      "#cw-faq-list::-webkit-scrollbar-thumb,#cw-home-list::-webkit-scrollbar-thumb,#cw-messages-list::-webkit-scrollbar-thumb{background:#d4d6dd;border-radius:3px}" +
       ".cw-faq-item{background:#fff;border:1px solid #e8e9ee;border-radius:12px;overflow:hidden}" +
       ".cw-faq-q{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;padding:13px 14px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:550;color:#1a1c22;line-height:1.4}" +
       ".cw-faq-q span{flex:1}" +
@@ -181,13 +246,25 @@
       ".cw-faq-item.cw-open .cw-faq-a{display:block;animation:cw-in .22s ease}" +
       ".cw-faq-cta{margin-top:6px;background:none;border:none;color:" + shade(brand, -0.2) + ";font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;padding:10px;border-radius:10px;transition:background .15s ease}" +
       ".cw-faq-cta:hover{background:" + rgba(brand, 0.08) + "}" +
+      ".cw-faq-empty{padding:30px 20px;text-align:center;color:#a3a6b1;font-size:13.5px}" +
+
+      /* bottom tab bar */
+      "#cw-tabbar{display:flex;border-top:1px solid #ecedf1;background:#fff;flex-shrink:0}" +
+      ".cw-tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;padding:9px 4px 8px;cursor:pointer;font-family:inherit;color:#9296a3;position:relative;transition:color .15s ease}" +
+      ".cw-tab:hover{color:" + shade(brand, -0.1) + "}" +
+      ".cw-tab.cw-tab-active{color:" + brand + "}" +
+      ".cw-tab-ico{position:relative;display:flex}" +
+      ".cw-tab-ico svg{width:21px;height:21px}" +
+      ".cw-tab span{font-size:10.5px;font-weight:600}" +
+      ".cw-tab-badge{position:absolute;top:-4px;right:-8px;background:#ef4444;color:#fff;font-size:9.5px;font-weight:700;min-width:15px;height:15px;border-radius:8px;display:none;align-items:center;justify-content:center;padding:0 3px;box-shadow:0 0 0 2px #fff}" +
 
       /* avatars */
       ".cw-avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;object-fit:cover;display:flex;align-items:center;justify-content:center;font-weight:650;font-size:14px;overflow:hidden;background:" + shade(brand, 0.75) + ";color:" + shade(brand, -0.35) + "}" +
       "#cw-header .cw-avatar{box-shadow:0 0 0 2px rgba(255,255,255,.35);background:rgba(255,255,255,.22);color:" + onBrand + "}" +
       ".cw-avatar-sm{width:26px;height:26px;font-size:10.5px;align-self:flex-end;margin-bottom:2px}" +
+      ".cw-avatar-row{width:34px;height:34px;font-size:12px}" +
 
-      /* messages */
+      /* messages (chat view) */
       "#cw-messages{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:10px;background:#f7f8fa;scroll-behavior:smooth}" +
       "#cw-messages::-webkit-scrollbar{width:6px}" +
       "#cw-messages::-webkit-scrollbar-thumb{background:#d4d6dd;border-radius:3px}" +
@@ -198,12 +275,6 @@
       ".cw-msg{max-width:78%;padding:10px 14px;border-radius:18px;font-size:14.5px;line-height:1.45;white-space:pre-wrap;word-wrap:break-word;overflow-wrap:anywhere}" +
       ".cw-msg-bot{background:#fff;color:#1a1c22;border:1px solid #e8e9ee;border-bottom-left-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.04)}" +
       ".cw-msg-user{background:linear-gradient(135deg," + brand + "," + shade(brand, -0.15) + ");color:" + onBrand + ";border-bottom-right-radius:6px}" +
-
-      /* quick replies */
-      "#cw-quick{display:flex;flex-wrap:wrap;gap:7px;padding:2px 0 2px 34px;animation:cw-in .3s ease}" +
-      ".cw-chip{background:#fff;border:1.5px solid " + rgba(brand, 0.35) + ";color:" + shade(brand, -0.25) + ";padding:7px 13px;border-radius:16px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease;line-height:1.3}" +
-      ".cw-chip:hover{background:" + rgba(brand, 0.08) + ";border-color:" + brand + ";transform:translateY(-1px)}" +
-      ".cw-chip:active{transform:translateY(0)}" +
 
       /* typing indicator */
       ".cw-typing{background:#fff;border:1px solid #e8e9ee;border-bottom-left-radius:6px;border-radius:18px;padding:13px 16px;display:flex;gap:4px;align-items:center}" +
@@ -220,7 +291,7 @@
       "#cw-send:hover:not(:disabled){transform:scale(1.06)}" +
       "#cw-send:disabled{opacity:.45;cursor:default}" +
       "#cw-send svg{width:17px;height:17px}" +
-      "#cw-footer{text-align:center;font-size:11px;color:#b0b3bd;padding:0 0 9px;background:#fff;letter-spacing:.01em}" +
+      "#cw-footer{text-align:center;font-size:11px;color:#b0b3bd;padding:6px 0;background:#fff;letter-spacing:.01em}" +
 
       "@media (max-width:480px){#cw-window{right:12px;left:12px;bottom:88px;width:auto;max-width:none;height:calc(100vh - 120px)}#cw-root{right:16px;bottom:16px}}";
     document.head.appendChild(style);
@@ -234,21 +305,31 @@
         else node.setAttribute(k, attrs[k]);
       });
     }
-    (children || []).forEach(function (c) { node.appendChild(c); });
+    (children || []).forEach(function (c) { if (c) node.appendChild(c); });
     return node;
+  }
+
+  var ICONS = {
+    chat: '<path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path>',
+    home: '<path d="M3 11.5L12 4l9 7.5"></path><path d="M5 10v9.5a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"></path>',
+    help: '<circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line>',
+    send: '<path d="M2 21l21-9L2 3v7l15 2-15 2z"></path>',
+  };
+  function svg(iconKey, strokeOrFill, filled) {
+    var attr = filled ? 'fill="' + strokeOrFill + '"' : 'fill="none" stroke="' + strokeOrFill + '" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"';
+    return '<svg viewBox="0 0 24 24" ' + attr + '>' + ICONS[iconKey] + "</svg>";
   }
 
   // Builds an avatar for whoever is currently answering (bot, or a human
   // agent if one has taken over). Falls back to initials when there's no
-  // usable image.
-  function makeAvatar(small, sender) {
-    var responder = sender || currentResponder ||
-      { name: config.botName, avatarUrl: config.avatarUrl };
-    var cls = "cw-avatar" + (small ? " cw-avatar-sm" : "");
+  // usable image. `sender` overrides the "current" responder -- used for
+  // individual past messages and for Messages-tab rows, which may belong to
+  // a different responder than whoever is live right now.
+  function makeAvatar(sizeClass, sender) {
+    var responder = sender || currentResponder || { name: config.botName, avatarUrl: config.avatarUrl };
+    var cls = "cw-avatar" + (sizeClass ? " " + sizeClass : "");
     if (responder.avatarUrl) {
       var img = el("img", { class: cls, src: responder.avatarUrl, alt: responder.name || "" });
-      // If the image 404s or is blocked, swap in initials rather than
-      // leaving a broken-image icon in the header.
       img.addEventListener("error", function () {
         var fallback = el("div", { class: cls, text: initialsOf(responder.name) });
         if (img.parentNode) img.parentNode.replaceChild(fallback, img);
@@ -262,27 +343,29 @@
     var responder = currentResponder || { name: config.botName, avatarUrl: config.avatarUrl };
     els.title.textContent = responder.name || config.botName;
     els.statusText.textContent = currentResponder ? "Live agent" : "Online";
-    var fresh = makeAvatar(false);
+    var fresh = makeAvatar("");
     els.headerAvatar.parentNode.replaceChild(fresh, els.headerAvatar);
     els.headerAvatar = fresh;
   }
+
+  // ---- building the UI shell -------------------------------------------
 
   function buildUI() {
     var root = el("div", { id: "cw-root" });
 
     var bubble = el("button", { id: "cw-bubble", "aria-label": "Open chat" });
     bubble.innerHTML =
-      '<svg class="cw-ico-chat" viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) + '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>' +
+      '<svg class="cw-ico-chat" viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) + '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + ICONS.chat + "</svg>" +
       '<svg class="cw-ico-close" viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) + '" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>';
 
     var win = el("div", { id: "cw-window", role: "dialog", "aria-label": "Chat" });
 
-    var backBtn = el("button", { id: "cw-back", "aria-label": "Back to menu" });
+    var backBtn = el("button", { id: "cw-back", "aria-label": "Back" });
     backBtn.innerHTML =
       '<svg viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) +
       '" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>';
 
-    var headerAvatar = makeAvatar(false);
+    var headerAvatar = makeAvatar("");
     var title = el("span", { id: "cw-title", text: config.botName });
     var statusDot = el("i", {});
     var statusText = el("span", { text: "Online" });
@@ -291,28 +374,41 @@
     var closeBtn = el("button", { id: "cw-close", "aria-label": "Close chat", text: "✕" });
     var header = el("div", { id: "cw-header" }, [backBtn, headerAvatar, headerInfo, closeBtn]);
 
-    // --- chat view ---
+    // --- chat view: an open conversation ---
     var messages = el("div", { id: "cw-messages" });
     var input = el("textarea", { id: "cw-input", rows: "1", placeholder: "Type a message…" });
     var send = el("button", { id: "cw-send", "aria-label": "Send" });
-    send.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="' + contrastText(config.brandColor) + '"><path d="M2 21l21-9L2 3v7l15 2-15 2z"></path></svg>';
+    send.innerHTML = svg("send", contrastText(config.brandColor), true);
     var inputBar = el("div", { id: "cw-inputbar" }, [input, send]);
     var footer = el("div", { id: "cw-footer", text: "Powered by chatbot-ai" });
     var chatView = el("div", { class: "cw-view", "data-view": "chat" }, [messages, inputBar, footer]);
 
-    // --- menu view (what the chat's back arrow leads to) ---
-    var menuList = el("div", { id: "cw-menu-list" });
-    var menuView = el("div", { class: "cw-view", "data-view": "menu" }, [menuList]);
+    // --- home view ---
+    var homeList = el("div", { id: "cw-home-list" });
+    var homeView = el("div", { class: "cw-view", "data-view": "home" }, [homeList]);
 
-    // --- faq view ---
+    // --- messages view (past conversations) ---
+    var messagesList = el("div", { id: "cw-messages-list" });
+    var messagesView = el("div", { class: "cw-view", "data-view": "messages" }, [messagesList]);
+
+    // --- help view (FAQs) ---
     var faqList = el("div", { id: "cw-faq-list" });
     var faqView = el("div", { class: "cw-view", "data-view": "faq" }, [faqList]);
 
+    // --- bottom tab bar ---
+    var tabHome = tabButton("home", ICONS.home, "Home");
+    var tabMessages = tabButton("messages", ICONS.chat, "Messages");
+    var tabBadge = el("span", { class: "cw-tab-badge" });
+    tabMessages.querySelector(".cw-tab-ico").appendChild(tabBadge);
+    var tabHelp = tabButton("faq", ICONS.help, "Help");
+    var tabbar = el("div", { id: "cw-tabbar" }, [tabHome, tabMessages, tabHelp]);
+
     win.appendChild(header);
-    win.appendChild(chatView);
-    win.appendChild(menuView);
+    win.appendChild(homeView);
+    win.appendChild(messagesView);
     win.appendChild(faqView);
+    win.appendChild(chatView);
+    win.appendChild(tabbar);
     root.appendChild(win);
     root.appendChild(bubble);
     document.body.appendChild(root);
@@ -321,17 +417,19 @@
       root: root, bubble: bubble, window: win, header: header, back: backBtn,
       headerAvatar: headerAvatar, title: title, status: status, statusText: statusText,
       close: closeBtn, messages: messages, input: input, send: send,
-      views: { chat: chatView, menu: menuView, faq: faqView },
-      menuList: menuList, faqList: faqList,
+      views: { chat: chatView, home: homeView, messages: messagesView, faq: faqView },
+      tabbar: tabbar, tabs: { home: tabHome, messages: tabMessages, faq: tabHelp },
+      tabBadge: tabBadge,
+      homeList: homeList, messagesList: messagesList, faqList: faqList,
     };
 
-    buildMenu();
+    buildHome();
     buildFaq();
-    showView("chat");
+    showView("home");
 
     bubble.addEventListener("click", toggleOpen);
     closeBtn.addEventListener("click", toggleOpen);
-    backBtn.addEventListener("click", function () { showView("menu"); });
+    backBtn.addEventListener("click", function () { showView(previousView); });
     send.addEventListener("click", sendMessage);
     input.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -345,93 +443,101 @@
     });
   }
 
-  // --- view navigation: chat <-> menu <-> faq ---------------------------
-  //
-  // The widget opens straight into the chat (that's the point of it). The
-  // back arrow goes "up" to a menu, from which the visitor can browse FAQs
-  // or drop back into the conversation -- which is still there, since views
-  // are hidden rather than torn down.
+  function tabButton(view, icon, label) {
+    var iconWrap = el("div", { class: "cw-tab-ico" });
+    iconWrap.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + icon + "</svg>";
+    var btn = el("button", { class: "cw-tab", type: "button", "data-tab": view }, [
+      iconWrap, el("span", { text: label }),
+    ]);
+    btn.addEventListener("click", function () { showView(view); });
+    return btn;
+  }
 
-  var currentView = "chat";
+  // ---- view navigation: home / messages / help are peer tabs; chat is a --
+  // ---- "pushed" screen reached from either, with a back arrow to return --
 
-  var VIEW_TITLES = {
-    menu: { title: "How can we help?", status: "" },
-    faq: { title: "FAQs", status: "" },
+  var previousView = "home"; // where the back arrow returns to from chat
+
+  var TAB_META = {
+    home: { title: "How can we help?" },
+    messages: { title: "Messages" },
+    faq: { title: "Help" },
   };
 
   function showView(name) {
+    if (name !== "chat") previousView = name;
     currentView = name;
     Object.keys(els.views).forEach(function (k) {
       els.views[k].classList.toggle("cw-active", k === name);
     });
-    // The back arrow only makes sense when there's somewhere to go back to.
-    els.root.classList.toggle("cw-has-back", name !== "menu");
-    els.window.classList.toggle("cw-on-menu", name === "menu");
+    els.window.classList.toggle("cw-view-chat", name === "chat");
+    els.root.classList.toggle("cw-has-back", name === "chat");
+    els.tabbar.style.display = name === "chat" ? "none" : "flex";
+    Object.keys(els.tabs).forEach(function (k) {
+      els.tabs[k].classList.toggle("cw-tab-active", k === name);
+    });
 
     if (name === "chat") {
       refreshHeaderIdentity();
       scrollToBottom();
       setTimeout(function () { els.input.focus(); }, 120);
     } else {
-      var meta = VIEW_TITLES[name];
-      els.title.textContent = meta.title;
-      els.statusText.textContent = meta.status;
-      els.status.style.display = meta.status ? "" : "none";
+      els.title.textContent = TAB_META[name].title;
+      els.status.style.display = "none";
+      if (name === "messages") renderMessagesList();
     }
-    if (name === "chat") els.status.style.display = "";
   }
 
-  function menuTile(icon, label, sub, onClick) {
+  function actionTile(icon, label, sub, onClick) {
     var iconEl = el("div", { class: "cw-tile-ico" });
-    iconEl.innerHTML = icon;
+    iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + icon + "</svg>";
     var textEl = el("div", { class: "cw-tile-text" }, [
       el("strong", { text: label }),
       el("span", { text: sub }),
     ]);
     var chevron = el("div", { class: "cw-tile-chev" });
-    chevron.innerHTML =
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"></path></svg>';
+    chevron.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"></path></svg>';
     var tile = el("button", { class: "cw-tile", type: "button" }, [iconEl, textEl, chevron]);
     tile.addEventListener("click", onClick);
     return tile;
   }
 
-  function buildMenu() {
-    els.menuList.innerHTML = "";
-    els.menuList.appendChild(el("div", { class: "cw-menu-head" }, [
-      makeAvatar(false),
+  function buildHome() {
+    els.homeList.innerHTML = "";
+    els.homeList.appendChild(el("div", { class: "cw-menu-head" }, [
+      makeAvatar(""),
       el("div", {}, [
         el("strong", { text: config.botName }),
         el("span", { text: "Typically replies in a few seconds" }),
       ]),
     ]));
 
-    els.menuList.appendChild(menuTile(
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>',
-      "Chat with us",
-      "Ask anything and get an instant answer",
-      function () { showView("chat"); }
+    els.homeList.appendChild(actionTile(
+      ICONS.chat, "Send us a message", "Start a new conversation",
+      function () { startNewConversation(); }
     ));
 
-    if (config.faqs && config.faqs.length) {
-      els.menuList.appendChild(menuTile(
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
-        "FAQs",
-        config.faqs.length + " common question" + (config.faqs.length === 1 ? "" : "s"),
-        function () { showView("faq"); }
-      ));
+    if (config.quickReplies && config.quickReplies.length) {
+      els.homeList.appendChild(el("div", { class: "cw-home-subhead", text: "Quick questions" }));
+      var wrap = el("div", { class: "cw-home-quick" });
+      config.quickReplies.forEach(function (q) {
+        var chip = el("button", { class: "cw-chip", type: "button", text: q });
+        chip.addEventListener("click", function () { startNewConversation(q); });
+        wrap.appendChild(chip);
+      });
+      els.homeList.appendChild(wrap);
     }
   }
 
   function buildFaq() {
     els.faqList.innerHTML = "";
+    if (!config.faqs || !config.faqs.length) {
+      els.faqList.appendChild(el("div", { class: "cw-faq-empty", text: "No help articles yet -- ask us anything and we'll do our best!" }));
+    }
     (config.faqs || []).forEach(function (faq) {
-      var q = el("button", { class: "cw-faq-q", type: "button" }, [
-        el("span", { text: faq.question }),
-      ]);
+      var q = el("button", { class: "cw-faq-q", type: "button" }, [el("span", { text: faq.question })]);
       var caret = el("i", { class: "cw-faq-caret" });
-      caret.innerHTML =
-        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>';
+      caret.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>';
       q.appendChild(caret);
       var a = el("div", { class: "cw-faq-a", text: faq.answer });
       var item = el("div", { class: "cw-faq-item" }, [q, a]);
@@ -439,11 +545,77 @@
       els.faqList.appendChild(item);
     });
 
-    // Always leave a route back to the bot -- the FAQ is a shortcut, not a
-    // dead end, and anything not covered here is exactly what the AI is for.
     var cta = el("button", { class: "cw-faq-cta", type: "button", text: "Still need help? Ask our assistant →" });
-    cta.addEventListener("click", function () { showView("chat"); });
+    cta.addEventListener("click", function () { startNewConversation(); });
     els.faqList.appendChild(cta);
+  }
+
+  function renderMessagesList() {
+    els.messagesList.innerHTML = "";
+    if (!conversationsCache.length) {
+      var empty = el("div", { class: "cw-empty" });
+      empty.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">' + ICONS.chat + "</svg>";
+      empty.appendChild(el("strong", { text: "No conversations yet" }));
+      empty.appendChild(el("span", { text: "Start a new conversation and it'll show up here." }));
+      var cta = el("button", { class: "cw-chip", type: "button", text: "Send us a message" });
+      cta.addEventListener("click", function () { startNewConversation(); });
+      empty.appendChild(cta);
+      els.messagesList.appendChild(empty);
+      return;
+    }
+
+    conversationsCache.forEach(function (conv) {
+      var unread = conv.id === currentConversationId ? 0 : Math.max(0, conv.seq - (readState[conv.id] || 0));
+      var responder = conv.agent ? { name: conv.agent.name, avatarUrl: conv.agent.avatarUrl } : { name: config.botName, avatarUrl: config.avatarUrl };
+      var previewText = conv.lastMessage
+        ? (conv.lastMessage.role === "user" ? "You: " : "") + conv.lastMessage.content
+        : "New conversation";
+
+      var row = el("button", { class: "cw-conv-row" + (unread > 0 ? " cw-unread" : ""), type: "button" }, [
+        makeAvatar("cw-avatar-row", responder),
+        el("div", { class: "cw-conv-text" }, [
+          el("div", { class: "cw-conv-top" }, [
+            el("strong", { text: responder.name }),
+            el("span", { class: "cw-conv-time", text: relativeTime(conv.updatedAt) }),
+          ]),
+          el("div", { class: "cw-conv-preview", text: previewText }),
+        ]),
+        unread > 0 ? el("span", { class: "cw-conv-badge", text: unread > 9 ? "9+" : String(unread) }) : null,
+      ]);
+      row.addEventListener("click", function () { openConversation(conv.id); });
+      els.messagesList.appendChild(row);
+    });
+  }
+
+  function updateBadge() {
+    var total = conversationsCache.reduce(function (sum, c) {
+      if (c.id === currentConversationId) return sum;
+      return sum + Math.max(0, c.seq - (readState[c.id] || 0));
+    }, 0);
+    els.tabBadge.textContent = total > 9 ? "9+" : String(total);
+    els.tabBadge.style.display = total > 0 ? "flex" : "none";
+  }
+
+  // Called from several places close together (creating a conversation,
+  // right after a reply, every poll tick) -- nothing stops two of those
+  // requests from resolving out of order, which would let a request fired
+  // BEFORE a reply exists land AFTER one fired after it, clobbering fresh
+  // data with stale. Only ever apply the response from the most recently
+  // *issued* request.
+  var conversationsFetchToken = 0;
+  function fetchConversations() {
+    var token = ++conversationsFetchToken;
+    var url = API_BASE + "/api/visitors/" + encodeURIComponent(visitorId) +
+      "/conversations?clientId=" + encodeURIComponent(clientId);
+    return fetch(url)
+      .then(function (r) { return r.ok ? r.json() : { conversations: [] }; })
+      .then(function (data) {
+        if (token !== conversationsFetchToken) return; // a newer request has since been issued
+        conversationsCache = data.conversations || [];
+        updateBadge();
+        if (currentView === "messages") renderMessagesList();
+      })
+      .catch(function () { /* transient network issue; next poll tick retries */ });
   }
 
   function toggleOpen() {
@@ -452,74 +624,118 @@
     els.root.classList.toggle("cw-is-open", isOpen);
     els.bubble.setAttribute("aria-label", isOpen ? "Close chat" : "Open chat");
     if (isOpen) {
-      if (!hasLoadedWelcome) {
-        hasLoadedWelcome = true;
-        restoreConversation();
-      }
+      fetchConversations();
       startPolling();
-      setTimeout(function () { els.input.focus(); }, 220);
+      if (currentView === "chat") setTimeout(function () { els.input.focus(); }, 220);
     } else {
       stopPolling();
     }
   }
 
-  // Pull anything the widget hasn't shown yet: the transcript from before a
-  // page reload, and any messages a human agent has sent since.
-  function fetchNewMessages() {
-    var url = API_BASE + "/api/sessions/" + encodeURIComponent(sessionId) +
+  // ---- an open conversation: creating, resuming, messaging -------------
+
+  function scrollToBottom() {
+    els.messages.scrollTop = els.messages.scrollHeight;
+  }
+
+  function addMessage(role, text, sender) {
+    var isUser = role === "user";
+    var bubbleEl = el("div", { class: "cw-msg " + (isUser ? "cw-msg-user" : "cw-msg-bot"), text: text });
+    var row = el("div", { class: "cw-row" + (isUser ? " cw-row-user" : "") },
+      isUser ? [bubbleEl] : [makeAvatar("cw-avatar-sm", sender), bubbleEl]);
+    els.messages.appendChild(row);
+    scrollToBottom();
+  }
+
+  function showTyping() {
+    var typing = el("div", { class: "cw-typing" });
+    typing.innerHTML = '<span class="cw-dot"></span><span class="cw-dot"></span><span class="cw-dot"></span>';
+    var row = el("div", { class: "cw-row", id: "cw-typing-row" }, [makeAvatar("cw-avatar-sm"), typing]);
+    els.messages.appendChild(row);
+    scrollToBottom();
+  }
+
+  function hideTyping() {
+    var row = document.getElementById("cw-typing-row");
+    if (row) row.remove();
+  }
+
+  function resetChatView() {
+    els.messages.innerHTML = "";
+    lastSeq = 0;
+    currentResponder = null;
+  }
+
+  // Home's "Send us a message", tapping a quick question there, and the
+  // Help tab's "Ask our assistant" link all land here -- always a genuinely
+  // new conversation, never reusing whatever was open before.
+  function startNewConversation(initialMessage) {
+    resetChatView();
+    currentConversationId = null;
+    showView("chat");
+    addMessage("bot", config.welcomeMessage);
+
+    fetch(API_BASE + "/api/conversations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId: clientId, visitorId: visitorId }),
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.error || "Could not start a conversation");
+        currentConversationId = res.data.sessionId;
+        fetchConversations();
+        if (initialMessage) submitText(initialMessage);
+      })
+      .catch(function (err) {
+        addMessage("bot", "Sorry, I couldn't start a new conversation: " + err.message);
+      });
+  }
+
+  // Messages tab: reopen a past conversation, replaying its full transcript.
+  function openConversation(conversationId) {
+    resetChatView();
+    currentConversationId = conversationId;
+    showView("chat");
+    fetchOpenConversationMessages(true);
+  }
+
+  function fetchOpenConversationMessages(isInitialLoad) {
+    if (!currentConversationId) return Promise.resolve();
+    var conversationId = currentConversationId; // guard against switching mid-request
+    var url = API_BASE + "/api/sessions/" + encodeURIComponent(conversationId) +
       "/messages?clientId=" + encodeURIComponent(clientId) + "&since=" + lastSeq;
-    return fetch(url).then(function (r) {
-      if (!r.ok) throw new Error("poll failed");
-      return r.json();
-    });
+    return fetch(url)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (data) {
+        if (!data || conversationId !== currentConversationId) return;
+        applyAgent(data.agent);
+        (data.messages || []).forEach(function (m) {
+          if (m.seq <= lastSeq) return;
+          addMessage(m.role === "user" ? "user" : "bot", m.content, m.sender);
+          lastSeq = m.seq;
+        });
+        if (isInitialLoad && !data.messages.length) {
+          // A conversation that was created but never actually messaged in.
+          addMessage("bot", config.welcomeMessage);
+        }
+        markRead(conversationId, data.seq);
+      })
+      .catch(function () { /* next poll tick retries */ });
   }
 
   function applyAgent(agent) {
     var changed = agent
       ? !currentResponder || currentResponder.name !== agent.name
       : !!currentResponder;
-    if (!changed) return;
     currentResponder = agent ? { name: agent.name, avatarUrl: agent.avatarUrl || "" } : null;
-    refreshHeaderIdentity();
-  }
-
-  function renderIncoming(messages) {
-    messages.forEach(function (m) {
-      if (m.seq <= lastSeq) return;
-      addMessage(m.role === "user" ? "user" : "bot", m.content, m.sender);
-      lastSeq = m.seq;
-    });
-  }
-
-  // On first open: if this visitor already has a conversation (they reloaded
-  // the page), replay it instead of starting over with the welcome message.
-  function restoreConversation() {
-    fetchNewMessages()
-      .then(function (data) {
-        applyAgent(data.agent);
-        if (data.messages && data.messages.length) {
-          renderIncoming(data.messages);
-        } else {
-          addMessage("bot", config.welcomeMessage);
-          renderQuickReplies();
-        }
-      })
-      .catch(function () {
-        addMessage("bot", config.welcomeMessage);
-        renderQuickReplies();
-      });
+    if (changed && currentView === "chat") refreshHeaderIdentity();
   }
 
   function pollOnce() {
-    // Skip while a send is in flight, otherwise the poll can echo back the
-    // message we've already rendered optimistically.
-    if (sendInFlight) return;
-    fetchNewMessages()
-      .then(function (data) {
-        applyAgent(data.agent);
-        renderIncoming(data.messages || []);
-      })
-      .catch(function () { /* transient network issue; next tick retries */ });
+    fetchConversations(); // keeps the Messages badge/list live from any tab
+    if (currentView !== "chat" || sendInFlight) return;
+    fetchOpenConversationMessages(false);
   }
 
   function startPolling() {
@@ -533,65 +749,16 @@
     pollTimer = null;
   }
 
-  function scrollToBottom() {
-    els.messages.scrollTop = els.messages.scrollHeight;
-  }
-
-  function addMessage(role, text, sender) {
-    var isUser = role === "user";
-    var bubbleEl = el("div", {
-      class: "cw-msg " + (isUser ? "cw-msg-user" : "cw-msg-bot"),
-      text: text,
-    });
-    var row = el("div", { class: "cw-row" + (isUser ? " cw-row-user" : "") },
-      isUser ? [bubbleEl] : [makeAvatar(true, sender), bubbleEl]);
-    els.messages.appendChild(row);
-    scrollToBottom();
-  }
-
-  function renderQuickReplies() {
-    if (!config.quickReplies || !config.quickReplies.length) return;
-    var wrap = el("div", { id: "cw-quick" });
-    config.quickReplies.forEach(function (text) {
-      var chip = el("button", { class: "cw-chip", type: "button", text: text });
-      chip.addEventListener("click", function () {
-        clearQuickReplies();
-        submitText(text);
-      });
-      wrap.appendChild(chip);
-    });
-    els.messages.appendChild(wrap);
-    scrollToBottom();
-  }
-
-  function clearQuickReplies() {
-    var wrap = document.getElementById("cw-quick");
-    if (wrap) wrap.remove();
-  }
-
-  function showTyping() {
-    var typing = el("div", { class: "cw-typing" });
-    typing.innerHTML = '<span class="cw-dot"></span><span class="cw-dot"></span><span class="cw-dot"></span>';
-    var row = el("div", { class: "cw-row", id: "cw-typing-row" }, [makeAvatar(true), typing]);
-    els.messages.appendChild(row);
-    scrollToBottom();
-  }
-
-  function hideTyping() {
-    var row = document.getElementById("cw-typing-row");
-    if (row) row.remove();
-  }
-
   function sendMessage() {
     var text = els.input.value.trim();
     if (!text) return;
     els.input.value = "";
     els.input.style.height = "auto";
-    clearQuickReplies();
     submitText(text);
   }
 
   function submitText(text) {
+    if (!currentConversationId) return; // conversation still being created; ignore stray input
     addMessage("user", text);
     els.send.disabled = true;
     sendInFlight = true;
@@ -600,7 +767,7 @@
     fetch(API_BASE + "/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: clientId, sessionId: sessionId, message: text }),
+      body: JSON.stringify({ clientId: clientId, sessionId: currentConversationId, message: text }),
     })
       .then(function (r) {
         return r.json().then(function (data) {
@@ -610,19 +777,17 @@
       })
       .then(function (data) {
         hideTyping();
-        // Everything the server has stored for this turn is now accounted
-        // for, so polling should only look past it.
         if (typeof data.seq === "number") lastSeq = Math.max(lastSeq, data.seq);
-
         if (data.agent && data.agent.name) applyAgent(data.agent);
 
         if (data.pending) {
-          // A human agent owns this conversation -- there's no instant reply
-          // to show. Their answer arrives via polling when they send it.
-          startPolling();
-          return;
+          // A human agent owns this conversation -- their answer arrives via
+          // polling when they send it, there's no instant reply to show.
+        } else {
+          addMessage("bot", data.reply);
         }
-        addMessage("bot", data.reply);
+        markRead(currentConversationId, data.seq);
+        fetchConversations(); // refresh Messages preview/order right away
       })
       .catch(function (err) {
         hideTyping();
@@ -634,37 +799,40 @@
       });
   }
 
-  // Ask the server which conversation this visitor owns. With verified
-  // identity that's their cross-device thread; otherwise the anonymous one.
-  function resolveSession() {
+  // ---- startup -----------------------------------------------------------
+
+  // Resolves which VISITOR this is (not which conversation) -- see
+  // /api/visitor/resolve. Anonymous visitors skip the round trip entirely
+  // and just use their local id directly.
+  function resolveVisitor() {
     if (!userId) return Promise.resolve();
-    return fetch(API_BASE + "/api/session/resolve", {
+    return fetch(API_BASE + "/api/visitor/resolve", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         clientId: clientId,
-        sessionId: sessionId,
+        anonymousVisitorId: visitorId,
         userId: userId,
         userHash: userHash,
       }),
     })
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
-        if (data && data.sessionId) sessionId = data.sessionId;
+        if (data && data.visitorId) visitorId = data.visitorId;
         if (data && userId && !data.identified) {
           console.warn(
             "[chat-widget] data-user-id was supplied but its data-user-hash did not " +
-            "verify, so chat history stays per-device. Sign the user id with this " +
+            "verify, so conversations stay per-device. Sign the user id with this " +
             "client's identitySecret on your server."
           );
         }
       })
-      .catch(function () { /* stay on the anonymous session */ });
+      .catch(function () { /* stay on the anonymous visitor id */ });
   }
 
   function init() {
     Promise.all([
-      resolveSession(),
+      resolveVisitor(),
       fetch(API_BASE + "/api/clients/" + encodeURIComponent(clientId) + "/public")
         .then(function (r) {
           if (!r.ok) throw new Error("client not found");
