@@ -86,13 +86,15 @@ automatically:
 A bottom tab bar with three peer tabs, plus a conversation view reached by
 drilling into either of them:
 
-- **Home** — quick answers without needing to chat: the bot's greeting plus
-  its top 3 FAQs (`HOME_FAQ_COUNT` in `widget.js`) as an inline
-  expand/collapse accordion — tapping one shows the answer right there, no
-  conversation started, no navigation. Ends in a "Message us directly →"
-  fallback link for anything not covered. The "Top questions" header (and
-  the whole section) is omitted for a client with no FAQs configured, but
-  the fallback link always stays so Home is never a dead end.
+- **Home** — quick answers without needing to chat: bot greeting, a
+  "Message us directly" tile, its top 3 FAQs (`HOME_FAQ_COUNT` in
+  `widget.js`) as an inline expand/collapse accordion, and a live search
+  box below them that filters the *full* FAQ list as you type (not just
+  the top 3) — matches are shown as the same expandable accordion, right
+  under the search box, no page navigation. Tapping a top-3 or search-result
+  question shows the answer right there. The FAQ section (and search box)
+  is omitted entirely for a client with no FAQs configured, but the
+  "Message us directly" tile always stays so Home is never a dead end.
 - **Messages** — where a visitor actually starts or continues talking. A
   "Send us a message" tile sits above a "Past conversations" list: every
   conversation this visitor has had, most recent first, with a preview of
@@ -110,6 +112,11 @@ drilling into either of them:
   quick-reply chips (`config.quickReplies`), inline in the chat, exactly
   where the old pre-tab-bar widget showed them — tapping one sends it
   immediately as the first message.
+
+**Branding.** A small "⚡ Powered by Branofy" pill sits to the left of the
+launcher bubble itself (a sibling in `#cw-root`, not inside the chat
+window), visible whether the widget is open or closed — hidden on narrow
+screens (`@media (max-width:480px)`) to avoid crowding the corner.
 
 **Reply suggestions ("smart replies").** After each AI reply (not during a
 live-agent handoff), the server may also return up to 2 short, contextual

@@ -167,10 +167,15 @@
     var onBrand = contrastText(brand);
     var style = document.createElement("style");
     style.textContent =
-      "#cw-root{position:fixed;bottom:20px;right:20px;z-index:2147483000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased}" +
+      "#cw-root{position:fixed;bottom:20px;right:20px;z-index:2147483000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,Helvetica,Arial,sans-serif;-webkit-font-smoothing:antialiased;display:flex;align-items:center;gap:10px}" +
+
+      /* "powered by" badge, left of the launcher bubble. #cw-window is a
+         sibling with its own independent fixed position, so it isn't part
+         of this flex row -- only the badge and the bubble are. */
+      "#cw-powered-badge{background:#fff;color:#6b6f7b;font-size:12px;font-weight:600;padding:9px 15px;border-radius:20px;box-shadow:0 4px 14px rgba(0,0,0,.12);white-space:nowrap;letter-spacing:.01em;user-select:none}" +
 
       /* launcher bubble */
-      "#cw-bubble{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg," + brand + "," + shade(brand, -0.2) + ");box-shadow:0 6px 20px " + rgba(brand, 0.45) + ",0 2px 6px rgba(0,0,0,.12);cursor:pointer;display:flex;align-items:center;justify-content:center;border:none;padding:0;transition:transform .2s cubic-bezier(.34,1.56,.64,1),box-shadow .2s ease}" +
+      "#cw-bubble{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg," + brand + "," + shade(brand, -0.2) + ");box-shadow:0 6px 20px " + rgba(brand, 0.45) + ",0 2px 6px rgba(0,0,0,.12);cursor:pointer;display:flex;align-items:center;justify-content:center;border:none;padding:0;flex-shrink:0;transition:transform .2s cubic-bezier(.34,1.56,.64,1),box-shadow .2s ease}" +
       "#cw-bubble:hover{transform:scale(1.08)}" +
       "#cw-bubble:active{transform:scale(.96)}" +
       "#cw-bubble svg{width:27px;height:27px;transition:transform .25s ease}" +
@@ -216,6 +221,12 @@
       ".cw-tile-chev svg{width:17px;height:17px}" +
       ".cw-home-subhead{font-size:12.5px;font-weight:650;color:#8a8d99;text-transform:uppercase;letter-spacing:.03em;margin:10px 2px 0}" +
       ".cw-home-quick{display:flex;flex-wrap:wrap;gap:7px}" +
+      "#cw-home-search{width:100%;box-sizing:border-box;border:1.5px solid #e2e4ea;border-radius:12px;padding:10px 14px;font-size:14px;font-family:inherit;outline:none;background:#fff;color:#1a1c22;transition:border-color .15s ease,box-shadow .15s ease}" +
+      "#cw-home-search:focus{border-color:" + brand + ";box-shadow:0 0 0 3px " + rgba(brand, 0.12) + "}" +
+      "#cw-home-search::placeholder{color:#a8abb6}" +
+      "#cw-home-search-results{display:flex;flex-direction:column;gap:8px}" +
+      "#cw-home-search-results:empty{display:none}" +
+      ".cw-search-empty{padding:10px 4px;font-size:13px;color:#a3a6b1;text-align:center}" +
 
       /* quick-question chips (Home) */
       ".cw-chip{background:#fff;border:1.5px solid " + rgba(brand, 0.35) + ";color:" + shade(brand, -0.25) + ";padding:8px 14px;border-radius:16px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease;line-height:1.3}" +
@@ -310,7 +321,7 @@
       "#cw-footer-home:hover{color:" + brand + ";background:" + rgba(brand, 0.08) + "}" +
       "#cw-footer-home svg{width:19px;height:19px}" +
 
-      "@media (max-width:480px){#cw-window{right:12px;left:12px;bottom:88px;width:auto;max-width:none;height:calc(100vh - 120px)}#cw-root{right:16px;bottom:16px}}";
+      "@media (max-width:480px){#cw-window{right:12px;left:12px;bottom:88px;width:auto;max-width:none;height:calc(100vh - 120px)}#cw-root{right:16px;bottom:16px}#cw-powered-badge{display:none}}";
     document.head.appendChild(style);
   }
 
@@ -408,6 +419,10 @@
       '<svg class="cw-ico-chat" viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) + '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + ICONS.chat + "</svg>" +
       '<svg class="cw-ico-close" viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) + '" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>';
 
+    // Sits to the left of the launcher bubble, always visible (open or
+    // closed) since it's a sibling of the bubble, not inside the window.
+    var poweredBadge = el("div", { id: "cw-powered-badge", text: "⚡ Powered by Branofy" });
+
     var win = el("div", { id: "cw-window", role: "dialog", "aria-label": "Chat" });
 
     var backBtn = el("button", { id: "cw-back", "aria-label": "Back" });
@@ -468,6 +483,7 @@
     win.appendChild(chatView);
     win.appendChild(tabbar);
     root.appendChild(win);
+    root.appendChild(poweredBadge);
     root.appendChild(bubble);
     document.body.appendChild(root);
 
@@ -606,7 +622,40 @@
     if (topFaqs.length) {
       els.homeList.appendChild(el("div", { class: "cw-home-subhead", text: "Top questions" }));
       renderFaqItems(els.homeList, topFaqs);
+
+      // Searches the FULL faq list (not just the top 3 above), live as the
+      // visitor types -- a way to find something not in the top picks
+      // without leaving Home or opening a conversation.
+      els.homeList.appendChild(el("div", { class: "cw-home-subhead", text: "Search all questions" }));
+      var searchInput = el("input", {
+        type: "text", id: "cw-home-search", placeholder: "e.g. shipping, pricing, returns…", autocomplete: "off",
+      });
+      var searchResults = el("div", { id: "cw-home-search-results" });
+      searchInput.addEventListener("input", function () {
+        renderHomeSearchResults(searchInput.value.trim(), searchResults);
+      });
+      els.homeList.appendChild(searchInput);
+      els.homeList.appendChild(searchResults);
     }
+  }
+
+  var MAX_SEARCH_RESULTS = 5;
+
+  function renderHomeSearchResults(query, resultsEl) {
+    resultsEl.innerHTML = "";
+    if (!query) return;
+    var q = query.toLowerCase();
+    var matches = (config.faqs || [])
+      .filter(function (f) {
+        return f.question.toLowerCase().indexOf(q) !== -1 || f.answer.toLowerCase().indexOf(q) !== -1;
+      })
+      .slice(0, MAX_SEARCH_RESULTS);
+
+    if (!matches.length) {
+      resultsEl.appendChild(el("div", { class: "cw-search-empty", text: "No matching questions" }));
+      return;
+    }
+    renderFaqItems(resultsEl, matches);
   }
 
   // Help: the full FAQ library, same accordion, same "ask a human" fallback.

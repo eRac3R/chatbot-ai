@@ -5,14 +5,210 @@
 <title>BrightBrew Coffee — demo site</title>
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
-  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; max-width: 640px; margin: 60px auto; padding: 0 20px; line-height: 1.6; color: #222; }
-  h1 { color: #6366f1; }
+  :root {
+    --brown-900: #2b1a12;
+    --brown-800: #3d2418;
+    --brown-600: #6b4530;
+    --cream-100: #fdf8f1;
+    --cream-200: #f5ead9;
+    --amber-500: #c17d3d;
+    --amber-600: #a8632a;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    color: var(--brown-900);
+    background: var(--cream-100);
+    line-height: 1.6;
+  }
+  a { color: inherit; }
+
+  /* ---- nav ---- */
+  nav {
+    position: sticky; top: 0; z-index: 10;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 16px 6%;
+    background: rgba(253, 248, 241, 0.92);
+    backdrop-filter: blur(8px);
+    border-bottom: 1px solid rgba(43, 26, 18, 0.08);
+  }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 800; font-size: 20px; }
+  .brand-mark {
+    width: 34px; height: 34px; border-radius: 10px;
+    background: linear-gradient(135deg, var(--amber-500), var(--brown-600));
+    display: flex; align-items: center; justify-content: center; font-size: 17px;
+  }
+  nav .links { display: flex; gap: 28px; font-size: 14.5px; font-weight: 600; opacity: .8; }
+  nav .links a:hover { opacity: 1; text-decoration: underline; }
+
+  /* ---- hero ---- */
+  .hero {
+    position: relative;
+    padding: 90px 6% 100px;
+    background: radial-gradient(1200px 500px at 15% -10%, #ecd8bc 0%, transparent 60%),
+                linear-gradient(180deg, var(--cream-200), var(--cream-100));
+    text-align: center;
+    overflow: hidden;
+  }
+  .hero .eyebrow {
+    display: inline-block; padding: 6px 14px; border-radius: 20px;
+    background: rgba(193, 125, 61, 0.14); color: var(--amber-600);
+    font-size: 12.5px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+    margin-bottom: 20px;
+  }
+  .hero h1 { font-size: clamp(32px, 5vw, 52px); margin: 0 0 16px; letter-spacing: -0.02em; }
+  .hero p.lead { max-width: 560px; margin: 0 auto 32px; font-size: 17.5px; color: var(--brown-600); }
+  .hero-ctas { display: flex; gap: 12px; justify-content: center; flex-wrap: wrap; }
+  .btn {
+    display: inline-block; padding: 13px 26px; border-radius: 12px; font-weight: 700; font-size: 15px;
+    cursor: pointer; border: none; text-decoration: none; transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .btn-primary { background: linear-gradient(135deg, var(--amber-500), var(--brown-600)); color: #fff; box-shadow: 0 8px 22px rgba(168, 99, 42, 0.35); }
+  .btn-primary:hover { transform: translateY(-2px); box-shadow: 0 12px 28px rgba(168, 99, 42, 0.42); }
+  .btn-ghost { background: #fff; color: var(--brown-800); border: 1.5px solid rgba(43,26,18,.15); }
+  .btn-ghost:hover { border-color: var(--brown-600); }
+
+  /* ---- sections ---- */
+  section { padding: 64px 6%; max-width: 1100px; margin: 0 auto; }
+  .section-head { text-align: center; max-width: 520px; margin: 0 auto 40px; }
+  .section-head h2 { font-size: 28px; margin: 0 0 10px; }
+  .section-head p { color: var(--brown-600); margin: 0; }
+
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px; }
+  .card {
+    background: #fff; border: 1px solid rgba(43,26,18,.08); border-radius: 16px; padding: 26px;
+    box-shadow: 0 2px 10px rgba(43,26,18,.04);
+    transition: transform .15s ease, box-shadow .15s ease;
+  }
+  .card:hover { transform: translateY(-3px); box-shadow: 0 10px 26px rgba(43,26,18,.09); }
+  .card .icon { font-size: 30px; margin-bottom: 14px; }
+  .card h3 { margin: 0 0 6px; font-size: 17.5px; }
+  .card .price { font-weight: 800; color: var(--amber-600); font-size: 19px; margin: 8px 0; }
+  .card p { margin: 0; color: var(--brown-600); font-size: 14.5px; }
+  .card .tag {
+    display: inline-block; margin-top: 12px; font-size: 11.5px; font-weight: 700;
+    color: var(--amber-600); background: rgba(193,125,61,.12); padding: 3px 9px; border-radius: 10px;
+  }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+  .split-art {
+    aspect-ratio: 4/3; border-radius: 20px;
+    background: linear-gradient(135deg, #e9d3b4, #c8a074);
+    display: flex; align-items: center; justify-content: center; font-size: 64px;
+  }
+  .split h2 { font-size: 26px; margin: 0 0 14px; }
+  .split p { color: var(--brown-600); margin: 0 0 12px; }
+  @media (max-width: 720px) { .split { grid-template-columns: 1fr; } }
+
+  /* ---- demo callout ---- */
+  .callout {
+    max-width: 1100px; margin: 0 auto 64px; margin-top: -20px;
+    background: var(--brown-900); color: var(--cream-100);
+    border-radius: 20px; padding: 30px 6%;
+    display: flex; align-items: center; gap: 22px; flex-wrap: wrap;
+  }
+  .callout .pulse {
+    width: 12px; height: 12px; border-radius: 50%; background: #4ade80; flex-shrink: 0;
+    box-shadow: 0 0 0 4px rgba(74, 222, 128, .25);
+  }
+  .callout strong { display: block; font-size: 15.5px; margin-bottom: 4px; }
+  .callout span { font-size: 13.5px; opacity: .75; }
+  .callout .arrow { margin-left: auto; font-size: 22px; opacity: .6; }
+
+  footer {
+    padding: 40px 6% 60px; text-align: center; color: var(--brown-600); font-size: 13.5px;
+    border-top: 1px solid rgba(43,26,18,.08);
+  }
 </style>
 </head>
 <body>
-  <h1>☕ BrightBrew Coffee</h1>
-  <p>This is a stand-in for a real customer's website. It has nothing to do with the chat widget's code — it just includes one script tag at the bottom, exactly like a real customer would.</p>
-  <p>Click the chat bubble in the bottom-right corner and ask something like "how do I cancel?" or "do you ship to Canada?".</p>
+
+  <nav>
+    <div class="brand"><span class="brand-mark">☕</span> BrightBrew</div>
+    <div class="links">
+      <a href="#plans">Plans</a>
+      <a href="#gear">Gear</a>
+      <a href="#story">Our Story</a>
+    </div>
+  </nav>
+
+  <div class="hero">
+    <span class="eyebrow">Freshly roasted, every 2 weeks</span>
+    <h1>Coffee worth waking up for</h1>
+    <p class="lead">Small-farm beans from Colombia, Ethiopia, and Guatemala, roasted to order and shipped straight to your door. Cancel or pause anytime.</p>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="#plans">See plans</a>
+      <a class="btn btn-ghost" href="#gear">Shop gear</a>
+    </div>
+  </div>
+
+  <div class="callout">
+    <span class="pulse"></span>
+    <div>
+      <strong>👋 This page is a stand-in for a real customer's website</strong>
+      <span>It has nothing to do with the chat widget's code — the only thing added is one &lt;script&gt; tag at the bottom, exactly like a real business would. Click the chat bubble bottom-right and try "how do I cancel?" or "do you ship to Canada?".</span>
+    </div>
+    <span class="arrow">↘</span>
+  </div>
+
+  <section id="plans">
+    <div class="section-head">
+      <h2>Subscription plans</h2>
+      <p>Pick your roast, pick your grind, pause or cancel whenever.</p>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <div class="icon">🌱</div>
+        <h3>Starter</h3>
+        <div class="price">$16<span style="font-size:13px;font-weight:600;color:var(--brown-600)">/mo</span></div>
+        <p>One 12oz bag every 2 weeks. Whole bean or ground.</p>
+        <span class="tag">Free US shipping</span>
+      </div>
+      <div class="card">
+        <div class="icon">🌍</div>
+        <h3>Origin Trio</h3>
+        <div class="price">$42<span style="font-size:13px;font-weight:600;color:var(--brown-600)">/mo</span></div>
+        <p>One bag each from Colombia, Ethiopia &amp; Guatemala.</p>
+        <span class="tag">Most popular</span>
+      </div>
+      <div class="card">
+        <div class="icon">🎁</div>
+        <h3>Gift a Bag</h3>
+        <div class="price">$18<span style="font-size:13px;font-weight:600;color:var(--brown-600)">one-time</span></div>
+        <p>A single bag with a welcome card, no subscription needed.</p>
+        <span class="tag">No commitment</span>
+      </div>
+    </div>
+  </section>
+
+  <section id="gear">
+    <div class="section-head">
+      <h2>Brewing gear</h2>
+      <p>Everything you need to make it worth the wait.</p>
+    </div>
+    <div class="grid">
+      <div class="card"><div class="icon">⏳</div><h3>Pour-over kit</h3><div class="price">$35</div><p>Dripper, filters &amp; a starter guide.</p></div>
+      <div class="card"><div class="icon">🫖</div><h3>French press</h3><div class="price">$28</div><p>34oz borosilicate glass, stainless mesh.</p></div>
+      <div class="card"><div class="icon">⚙️</div><h3>Burr grinder</h3><div class="price">$60–120</div><p>Consistent grind, 15 settings.</p></div>
+    </div>
+  </section>
+
+  <section id="story">
+    <div class="split">
+      <div>
+        <h2>Small farms, direct relationships</h2>
+        <p>We work directly with growers in Colombia, Ethiopia, and Guatemala — no middlemen, fairer prices, and beans that actually taste like where they're from.</p>
+        <p>Roasted in small batches within days of your order, not months before it hits a shelf.</p>
+        <a class="btn btn-primary" href="#plans">Start your subscription</a>
+      </div>
+      <div class="split-art">🌤️☕🌱</div>
+    </div>
+  </section>
+
+  <footer>
+    Demo storefront for testing the chatbot-ai widget · Not a real business
+  </footer>
 
   <!-- This is the entire integration a business needs to add: -->
   <script src="/widget.js" data-client-id="demo"></script>
