@@ -9,6 +9,16 @@ const CLIENT_INDEX_KEY = "chatbot:client-index";
 
 const MAX_QUICK_REPLIES = 4;
 
+// Deliberately generic -- greeting, what they sell, price, how to reach a
+// human. These read sensibly for a pizzeria, a SaaS product or a gym alike,
+// so a client is usable before anyone customises them.
+const DEFAULT_QUICK_REPLIES = [
+  "Hi!",
+  "What do you offer?",
+  "How much does it cost?",
+  "How can I contact you?",
+];
+
 function isValidClientId(clientId) {
   return typeof clientId === "string" && /^[a-zA-Z0-9_-]{3,64}$/.test(clientId);
 }
@@ -164,7 +174,7 @@ async function upsertClient(config) {
     quickReplies:
       config.quickReplies !== undefined
         ? sanitizeQuickReplies(config.quickReplies)
-        : existing.quickReplies ?? ["Hi!"],
+        : existing.quickReplies ?? DEFAULT_QUICK_REPLIES,
     // Shared secret the business's own backend uses to sign the id of a
     // logged-in user, proving the widget really is that person before we
     // hand over their cross-device chat history. Generated once, never
