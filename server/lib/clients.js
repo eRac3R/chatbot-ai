@@ -37,13 +37,19 @@ function sanitizeAvatarUrl(url) {
 
 // Suggested-question buttons shown under the welcome message so visitors can
 // start a conversation in one tap instead of typing.
+//
+// Always returns exactly MAX_QUICK_REPLIES entries: a blank slot falls back
+// to the default for that position rather than dropping the button, so the
+// widget never renders a half-empty row. Backfill is positional, so the
+// caller must send blanks in place rather than a compacted list.
 function sanitizeQuickReplies(replies) {
-  if (!Array.isArray(replies)) return [];
-  return replies
-    .filter((r) => typeof r === "string")
-    .map((r) => r.trim().slice(0, 60))
-    .filter(Boolean)
-    .slice(0, MAX_QUICK_REPLIES);
+  const list = Array.isArray(replies) ? replies : [];
+  const out = [];
+  for (let i = 0; i < MAX_QUICK_REPLIES; i++) {
+    const raw = typeof list[i] === "string" ? list[i].trim().slice(0, 60) : "";
+    out.push(raw || DEFAULT_QUICK_REPLIES[i]);
+  }
+  return out;
 }
 
 // ---- filesystem backend (local dev, no Redis env vars configured) ----

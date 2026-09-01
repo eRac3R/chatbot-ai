@@ -61,7 +61,8 @@
         Shown as tappable buttons under the welcome message, so visitors can start
         without typing. These come filled in with general-purpose questions that
         work for most businesses — keep them, or reword them to fit this client.
-        Clearing a box removes that button.
+        There are always 4 buttons: clear a box and it goes back to the default
+        question for that slot.
       </p>
       <label for="quickReply1">Button 1</label>
       <input type="text" id="quickReply1" maxlength="60" value="Hi!" />
@@ -200,9 +201,11 @@
       };
     }).filter(function (f) { return f.question && f.answer; });
 
+    // Send blanks in place rather than filtering them out -- the server
+    // backfills each empty slot with the default for that position, so
+    // positions must line up.
     var quickReplies = ["quickReply1", "quickReply2", "quickReply3", "quickReply4"]
-      .map(function (id) { return document.getElementById(id).value.trim(); })
-      .filter(Boolean);
+      .map(function (id) { return document.getElementById(id).value.trim(); });
 
     var payload = {
       id: document.getElementById("clientId").value.trim(),
