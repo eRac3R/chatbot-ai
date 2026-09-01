@@ -527,15 +527,15 @@
       ]),
     ]));
 
+    var cta = el("button", { class: "cw-faq-cta", type: "button", text: "Message us directly →" });
+    cta.addEventListener("click", function () { startNewConversation(); });
+    els.homeList.appendChild(cta);
+
     var topFaqs = (config.faqs || []).slice(0, HOME_FAQ_COUNT);
     if (topFaqs.length) {
       els.homeList.appendChild(el("div", { class: "cw-home-subhead", text: "Top questions" }));
       renderFaqItems(els.homeList, topFaqs);
     }
-
-    var cta = el("button", { class: "cw-faq-cta", type: "button", text: "Message us directly →" });
-    cta.addEventListener("click", function () { startNewConversation(); });
-    els.homeList.appendChild(cta);
   }
 
   // Help: the full FAQ library, same accordion, same "ask a human" fallback.
