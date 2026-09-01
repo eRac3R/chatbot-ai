@@ -227,6 +227,8 @@
       ".cw-conv-preview{font-size:13px;color:#7d808c;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}" +
       ".cw-conv-row.cw-unread .cw-conv-preview{color:#2a2c34;font-weight:550}" +
       ".cw-conv-badge{background:" + brand + ";color:" + contrastText(brand) + ";font-size:11px;font-weight:700;min-width:18px;height:18px;border-radius:9px;display:flex;align-items:center;justify-content:center;padding:0 5px;flex-shrink:0}" +
+      ".cw-conv-chev{color:#c2c5cf;display:flex;flex-shrink:0}" +
+      ".cw-conv-chev svg{width:16px;height:16px}" +
 
       /* faq / help */
       "#cw-faq-list{flex:1;overflow-y:auto;padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;background:#f7f8fa}" +
@@ -290,7 +292,10 @@
       "#cw-send:hover:not(:disabled){transform:scale(1.06)}" +
       "#cw-send:disabled{opacity:.45;cursor:default}" +
       "#cw-send svg{width:17px;height:17px}" +
-      "#cw-footer{text-align:center;font-size:11px;color:#b0b3bd;padding:6px 0;background:#fff;letter-spacing:.01em}" +
+      "#cw-footer{display:flex;align-items:center;justify-content:center;padding:6px 0;background:#fff;border-top:1px solid #f0f1f4}" +
+      "#cw-footer-home{background:none;border:none;color:#9296a3;cursor:pointer;padding:6px 16px;display:flex;align-items:center;justify-content:center;border-radius:8px;transition:color .15s ease,background .15s ease}" +
+      "#cw-footer-home:hover{color:" + brand + ";background:" + rgba(brand, 0.08) + "}" +
+      "#cw-footer-home svg{width:19px;height:19px}" +
 
       "@media (max-width:480px){#cw-window{right:12px;left:12px;bottom:88px;width:auto;max-width:none;height:calc(100vh - 120px)}#cw-root{right:16px;bottom:16px}}";
     document.head.appendChild(style);
@@ -379,7 +384,10 @@
     var send = el("button", { id: "cw-send", "aria-label": "Send" });
     send.innerHTML = svg("send", contrastText(config.brandColor), true);
     var inputBar = el("div", { id: "cw-inputbar" }, [input, send]);
-    var footer = el("div", { id: "cw-footer", text: "⚡ Powered by chatbot-ai" });
+    var footerHome = el("button", { id: "cw-footer-home", type: "button", "aria-label": "Go to Home" });
+    footerHome.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + ICONS.home + "</svg>";
+    footerHome.addEventListener("click", function () { showView("home"); });
+    var footer = el("div", { id: "cw-footer" }, [footerHome]);
     var chatView = el("div", { class: "cw-view", "data-view": "chat" }, [messages, inputBar, footer]);
 
     // --- home view ---
@@ -487,6 +495,14 @@
     }
   }
 
+  // Right-pointing chevron, used on anything tappable that navigates
+  // somewhere (action tiles, conversation rows) as an affordance hint.
+  function chevron(cls) {
+    var c = el("div", { class: cls || "cw-tile-chev" });
+    c.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"></path></svg>';
+    return c;
+  }
+
   function actionTile(icon, label, sub, onClick) {
     var iconEl = el("div", { class: "cw-tile-ico" });
     iconEl.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + icon + "</svg>";
@@ -494,9 +510,7 @@
       el("strong", { text: label }),
       el("span", { text: sub }),
     ]);
-    var chevron = el("div", { class: "cw-tile-chev" });
-    chevron.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"></path></svg>';
-    var tile = el("button", { class: "cw-tile", type: "button" }, [iconEl, textEl, chevron]);
+    var tile = el("button", { class: "cw-tile", type: "button" }, [iconEl, textEl, chevron()]);
     tile.addEventListener("click", onClick);
     return tile;
   }
@@ -594,6 +608,7 @@
           el("div", { class: "cw-conv-preview", text: previewText }),
         ]),
         unread > 0 ? el("span", { class: "cw-conv-badge", text: unread > 9 ? "9+" : String(unread) }) : null,
+        chevron("cw-conv-chev"),
       ]);
       row.addEventListener("click", function () { openConversation(conv.id); });
       els.messagesList.appendChild(row);
