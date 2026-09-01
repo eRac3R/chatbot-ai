@@ -3,6 +3,13 @@ const multer = require("multer");
 const { getClient, listClients, upsertClient, deleteClient } = require("../lib/clients");
 const { crawlWebsite } = require("../lib/crawler");
 const { extractPdfText } = require("../lib/pdfExtractor");
+const {
+  getSession,
+  appendMessage,
+  assignAgent,
+  releaseAgent,
+  listSessions,
+} = require("../lib/sessions");
 
 const router = express.Router();
 
@@ -91,6 +98,78 @@ router.delete("/clients/:id", async (req, res) => {
   const deleted = await deleteClient(req.params.id);
   if (!deleted) return res.status(404).json({ error: "Unknown client id" });
   res.json({ deleted: true });
+});
+
+// ---- live agent handoff ----
+//
+// The backend half of human takeover. There's no agent dashboard yet, so
+// these sit behind the same ADMIN_KEY as everything else; when a real agent
+// UI is built it should get its own per-agent auth rather than sharing the
+// admin key, since agents shouldn't be able to edit knowledge bases.
+
+// Active conversations for a client, most recently active first.
+router.get("/sessions", async (req, res) => {
+  const { clientId } = req.query;
+  if (!clientId) return res.status(400).json({ error: "clientId query param is required" });
+  res.json({ sessions: await listSessions(clientId) });
+});
+
+// Full transcript, for an agent reading up before replying.
+router.get("/sessions/:sessionId", async (req, res) => {
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "Unknown session" });
+  res.json(session);
+});
+
+// Take the conversation over from the bot. From here on the AI stops
+// answering this session and the visitor's widget shows this agent's name
+// and photo instead of the bot's.
+router.post("/sessions/:sessionId/takeover", async (req, res) => {
+  const { name, avatarUrl, greeting } = req.body || {};
+  if (typeof name !== "string" || !name.trim()) {
+    return res.status(400).json({ error: "Agent name is required" });
+  }
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "Unknown session" });
+
+  const agent = { name: name.trim().slice(0, 60), avatarUrl: avatarUrl || "" };
+  await assignAgent(session, agent);
+
+  if (typeof greeting === "string" && greeting.trim()) {
+    await appendMessage(session, {
+      role: "assistant",
+      content: greeting.trim(),
+      sender: agent,
+    });
+  }
+  res.json({ agent: session.agent, seq: session.seq });
+});
+
+// Agent sends a message to the visitor.
+router.post("/sessions/:sessionId/reply", async (req, res) => {
+  const { message } = req.body || {};
+  if (typeof message !== "string" || !message.trim()) {
+    return res.status(400).json({ error: "message is required" });
+  }
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "Unknown session" });
+  if (!session.agent) {
+    return res.status(409).json({ error: "Take the session over before replying" });
+  }
+  const saved = await appendMessage(session, {
+    role: "assistant",
+    content: message.trim(),
+    sender: session.agent,
+  });
+  res.json({ message: saved });
+});
+
+// Hand back to the bot. The bot sees everything the agent said as context.
+router.post("/sessions/:sessionId/release", async (req, res) => {
+  const session = await getSession(req.params.sessionId);
+  if (!session) return res.status(404).json({ error: "Unknown session" });
+  await releaseAgent(session);
+  res.json({ agent: null, seq: session.seq });
 });
 
 module.exports = router;

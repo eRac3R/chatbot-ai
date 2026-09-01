@@ -54,6 +54,13 @@
   var isOpen = false;
   var hasLoadedWelcome = false;
 
+  // Everything up to this sequence number is already on screen. Polling asks
+  // only for what's newer, so nothing gets rendered twice.
+  var lastSeq = 0;
+  var pollTimer = null;
+  var sendInFlight = false;
+  var POLL_INTERVAL_MS = 4000;
+
   // ---- small color helpers, so the widget adapts to any brand color ----
 
   function parseHex(hex) {
@@ -183,8 +190,9 @@
   // Builds an avatar for whoever is currently answering (bot, or a human
   // agent if one has taken over). Falls back to initials when there's no
   // usable image.
-  function makeAvatar(small) {
-    var responder = currentResponder || { name: config.botName, avatarUrl: config.avatarUrl };
+  function makeAvatar(small, sender) {
+    var responder = sender || currentResponder ||
+      { name: config.botName, avatarUrl: config.avatarUrl };
     var cls = "cw-avatar" + (small ? " cw-avatar-sm" : "");
     if (responder.avatarUrl) {
       var img = el("img", { class: cls, src: responder.avatarUrl, alt: responder.name || "" });
@@ -273,26 +281,98 @@
     els.bubble.setAttribute("aria-label", isOpen ? "Close chat" : "Open chat");
     if (isOpen) {
       if (!hasLoadedWelcome) {
+        hasLoadedWelcome = true;
+        restoreConversation();
+      }
+      startPolling();
+      setTimeout(function () { els.input.focus(); }, 220);
+    } else {
+      stopPolling();
+    }
+  }
+
+  // Pull anything the widget hasn't shown yet: the transcript from before a
+  // page reload, and any messages a human agent has sent since.
+  function fetchNewMessages() {
+    var url = API_BASE + "/api/sessions/" + encodeURIComponent(sessionId) +
+      "/messages?clientId=" + encodeURIComponent(clientId) + "&since=" + lastSeq;
+    return fetch(url).then(function (r) {
+      if (!r.ok) throw new Error("poll failed");
+      return r.json();
+    });
+  }
+
+  function applyAgent(agent) {
+    var changed = agent
+      ? !currentResponder || currentResponder.name !== agent.name
+      : !!currentResponder;
+    if (!changed) return;
+    currentResponder = agent ? { name: agent.name, avatarUrl: agent.avatarUrl || "" } : null;
+    refreshHeaderIdentity();
+  }
+
+  function renderIncoming(messages) {
+    messages.forEach(function (m) {
+      if (m.seq <= lastSeq) return;
+      addMessage(m.role === "user" ? "user" : "bot", m.content, m.sender);
+      lastSeq = m.seq;
+    });
+  }
+
+  // On first open: if this visitor already has a conversation (they reloaded
+  // the page), replay it instead of starting over with the welcome message.
+  function restoreConversation() {
+    fetchNewMessages()
+      .then(function (data) {
+        applyAgent(data.agent);
+        if (data.messages && data.messages.length) {
+          renderIncoming(data.messages);
+        } else {
+          addMessage("bot", config.welcomeMessage);
+          renderQuickReplies();
+        }
+      })
+      .catch(function () {
         addMessage("bot", config.welcomeMessage);
         renderQuickReplies();
-        hasLoadedWelcome = true;
-      }
-      setTimeout(function () { els.input.focus(); }, 220);
-    }
+      });
+  }
+
+  function pollOnce() {
+    // Skip while a send is in flight, otherwise the poll can echo back the
+    // message we've already rendered optimistically.
+    if (sendInFlight) return;
+    fetchNewMessages()
+      .then(function (data) {
+        applyAgent(data.agent);
+        renderIncoming(data.messages || []);
+      })
+      .catch(function () { /* transient network issue; next tick retries */ });
+  }
+
+  function startPolling() {
+    if (pollTimer) return;
+    pollTimer = setInterval(pollOnce, POLL_INTERVAL_MS);
+  }
+
+  function stopPolling() {
+    if (!pollTimer) return;
+    clearInterval(pollTimer);
+    pollTimer = null;
   }
 
   function scrollToBottom() {
     els.messages.scrollTop = els.messages.scrollHeight;
   }
 
-  function addMessage(role, text) {
+  function addMessage(role, text, sender) {
     var isUser = role === "user";
     var bubbleEl = el("div", {
       class: "cw-msg " + (isUser ? "cw-msg-user" : "cw-msg-bot"),
       text: text,
     });
     var row = el("div", { class: "cw-row" + (isUser ? " cw-row-user" : "") },
-      isUser ? [bubbleEl] : [makeAvatar(true), bubbleEl]);
+      isUser ? [bubbleEl] : [makeAvatar(true, sender), bubbleEl]);
     els.messages.appendChild(row);
     scrollToBottom();
   }
@@ -342,6 +422,7 @@
   function submitText(text) {
     addMessage("user", text);
     els.send.disabled = true;
+    sendInFlight = true;
     showTyping();
 
     fetch(API_BASE + "/api/chat", {
@@ -357,11 +438,17 @@
       })
       .then(function (data) {
         hideTyping();
-        // If a human agent has picked up this conversation, swap the
-        // identity shown in the header and on subsequent replies.
-        if (data.agent && data.agent.name) {
-          currentResponder = { name: data.agent.name, avatarUrl: data.agent.avatarUrl || "" };
-          refreshHeaderIdentity();
+        // Everything the server has stored for this turn is now accounted
+        // for, so polling should only look past it.
+        if (typeof data.seq === "number") lastSeq = Math.max(lastSeq, data.seq);
+
+        if (data.agent && data.agent.name) applyAgent(data.agent);
+
+        if (data.pending) {
+          // A human agent owns this conversation -- there's no instant reply
+          // to show. Their answer arrives via polling when they send it.
+          startPolling();
+          return;
         }
         addMessage("bot", data.reply);
       })
@@ -370,6 +457,7 @@
         addMessage("bot", "Sorry, I ran into a problem: " + err.message);
       })
       .finally(function () {
+        sendInFlight = false;
         els.send.disabled = false;
       });
   }

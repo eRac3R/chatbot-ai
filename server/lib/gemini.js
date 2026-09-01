@@ -35,6 +35,7 @@ function buildSystemPrompt(clientConfig) {
     `=== RULES ===`,
     `- Only answer using the business info and FAQs above. Do not invent facts, prices, or policies that aren't stated.`,
     `- If you don't know the answer from the info given, say so honestly and suggest the visitor contact the business directly.`,
+    `- Earlier replies prefixed "(human agent NAME):" were written by a human colleague at this business, not by you. Treat them as authoritative: honor what they promised, refer back to it if asked, and never contradict or deny it -- even if it isn't in the business info above. You still must not invent any NEW commitments of your own; if the visitor wants more than the agent offered, say you'll need to check with the team.`,
     `- Answer like a real staff member texting back, not a brochure. Reply ONLY to what was actually asked -- pull out just the relevant detail(s), don't recite the whole business info block every time.`,
     `- ONE short sentence by default. Two only if truly necessary. Never stack multiple unrelated facts into one reply just because they're both "relevant" -- pick the single fact that answers the question and stop there.`,
     `- No marketing/website copy tone -- drop words like "specialty", "straight to your door", "freshly roasted", exclamation-point enthusiasm on every line. Write it the way you'd actually text a friend, not how it reads on the homepage.`,

@@ -19,6 +19,12 @@ any website; each business gets its own knowledge base (product info + FAQs).
   - `POST /api/admin/extract-pdf` — extracts text from an uploaded PDF
     (product brochure, spec sheet, price list, etc.) to pre-fill
     `businessInfo`. Also protected by `ADMIN_KEY`.
+  - `GET /api/sessions/:sessionId/messages?clientId=…&since=…` — what the
+    widget polls while it's open, to pick up agent messages and to restore
+    the transcript after a page reload. The unguessable `sessionId` is the
+    credential here; `clientId` is checked as defence in depth.
+  - Live-agent endpoints (see below), all under `/api/admin/sessions`.
+
 - `widget/widget.js` — the embeddable script. Vanilla JS, no dependencies, no
   build step. Reads `data-client-id` off its own `<script>` tag and infers the
   API base URL from where it was loaded — so the exact same file works for
@@ -43,7 +49,7 @@ any website; each business gets its own knowledge base (product info + FAQs).
   base), used in local dev. A `demo.json` is included so you can try it
   immediately. When `UPSTASH_REDIS_REST_URL`/`_TOKEN` are set (required on
   Vercel — see Deploying below), `server/lib/clients.js` and
-  `server/lib/history.js` transparently switch to Redis instead, since
+  `server/lib/sessions.js` transparently switch to Redis instead, since
   serverless hosts don't offer a persistent disk or long-lived memory.
 
 Knowledge base entry has three paths, all landing in the same `businessInfo`
@@ -61,6 +67,44 @@ automatically:
   (15MB max, ~12k characters kept). Scanned/image-only PDFs (no real text
   layer) won't extract anything — you'd need to retype that content or paste
   it manually.
+
+### Live agent handoff
+
+The backend for human takeover is built; the agent-facing UI is not. A human
+can already take a conversation over end to end through the API:
+
+| Endpoint | What it does |
+| --- | --- |
+| `GET /api/admin/sessions?clientId=…` | Active conversations, most recent first |
+| `GET /api/admin/sessions/:id` | Full transcript for one conversation |
+| `POST /api/admin/sessions/:id/takeover` | `{name, avatarUrl?, greeting?}` — the AI stops answering this session |
+| `POST /api/admin/sessions/:id/reply` | `{message}` — agent replies by hand |
+| `POST /api/admin/sessions/:id/release` | Hands control back to the bot |
+
+Once an agent takes over, `POST /api/chat` stops calling Gemini for that
+session and returns `{pending: true, agent}`; the visitor's widget swaps the
+header and message avatars to the agent's name/photo and waits for their
+reply via polling. Bot messages keep the bot's avatar, so the history stays
+readable as a mixed conversation.
+
+When control is released, the bot picks up with the agent's messages in its
+context. Those are labelled `(human agent NAME):` in the history
+(`sessions.js`) and `gemini.js` has a matching rule telling the model to
+treat them as authoritative — without it the model reads them as its own
+output and its "never state anything outside the business info" rule makes
+it *deny* things a colleague just promised (it told a visitor "I don't offer
+discounts" moments after an agent granted 15% off). It will now honor and
+reference the agent's promise while still refusing to invent a bigger one
+itself.
+
+Two things to know before putting agents in front of customers:
+- These endpoints share `ADMIN_KEY`. A real agent UI should get its own
+  per-agent auth — support staff shouldn't be able to edit knowledge bases
+  or read other clients' data.
+- Delivery is 4-second polling while the widget is open, not websockets.
+  Fine at small scale and it works on Vercel (which doesn't hold persistent
+  connections); revisit if you need instant delivery or have many concurrent
+  chats.
 
 ## Setup
 
@@ -125,7 +169,7 @@ vanish, chat "memory" wouldn't persist between messages). This repo already
 has the Vercel-compatible pieces:
 - `api/index.js` + `vercel.json` — routes every request through the same
   Express app used locally, so nothing else about the app changes.
-- `server/lib/store.js` — the Redis switch: `clients.js` and `history.js`
+- `server/lib/store.js` — the Redis switch: `clients.js` and `sessions.js`
   automatically use Redis instead of files/memory once it's configured.
 
 Steps:
