@@ -117,8 +117,11 @@ drilling into either of them:
 
 **Branding.** A small "⚡ Powered by Branofy" pill sits to the left of the
 launcher bubble itself (a sibling in `#cw-root`, not inside the chat
-window), visible whether the widget is open or closed — hidden on narrow
-screens (`@media (max-width:480px)`) to avoid crowding the corner.
+window). It fades in only while the chat is open — CSS keys off the
+`.cw-is-open` class on `#cw-root`, so a closed widget is just the bare
+bubble. Because `#cw-root` is anchored to the right, the pill appearing on
+its left never nudges the bubble. Hidden entirely on narrow screens
+(`@media (max-width:480px)`) to avoid crowding the corner.
 
 **Reply suggestions ("smart replies").** After each AI reply (not during a
 live-agent handoff), the server may also return up to 2 short, contextual

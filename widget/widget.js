@@ -171,8 +171,11 @@
 
       /* "powered by" badge, left of the launcher bubble. #cw-window is a
          sibling with its own independent fixed position, so it isn't part
-         of this flex row -- only the badge and the bubble are. */
-      "#cw-powered-badge{background:#fff;color:#6b6f7b;font-size:12px;font-weight:600;padding:9px 15px;border-radius:20px;box-shadow:0 4px 14px rgba(0,0,0,.12);white-space:nowrap;letter-spacing:.01em;user-select:none}" +
+         of this flex row -- only the badge and the bubble are. Hidden until
+         the chat is opened; #cw-root is anchored right, so the badge fading
+         in on its left never shifts the bubble. */
+      "#cw-powered-badge{background:#fff;color:#6b6f7b;font-size:12px;font-weight:600;padding:9px 15px;border-radius:20px;box-shadow:0 4px 14px rgba(0,0,0,.12);white-space:nowrap;letter-spacing:.01em;user-select:none;opacity:0;visibility:hidden;transform:translateX(8px);transition:opacity .2s ease,transform .22s cubic-bezier(.34,1.3,.64,1),visibility .2s}" +
+      "#cw-root.cw-is-open #cw-powered-badge{opacity:1;visibility:visible;transform:translateX(0)}" +
 
       /* launcher bubble */
       "#cw-bubble{width:60px;height:60px;border-radius:50%;background:linear-gradient(135deg," + brand + "," + shade(brand, -0.2) + ");box-shadow:0 6px 20px " + rgba(brand, 0.45) + ",0 2px 6px rgba(0,0,0,.12);cursor:pointer;display:flex;align-items:center;justify-content:center;border:none;padding:0;flex-shrink:0;transition:transform .2s cubic-bezier(.34,1.56,.64,1),box-shadow .2s ease}" +
@@ -428,8 +431,9 @@
       '<svg class="cw-ico-chat" viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) + '" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">' + ICONS.chat + "</svg>" +
       '<svg class="cw-ico-close" viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) + '" stroke-width="2.4" stroke-linecap="round"><path d="M18 6L6 18M6 6l12 12"></path></svg>';
 
-    // Sits to the left of the launcher bubble, always visible (open or
-    // closed) since it's a sibling of the bubble, not inside the window.
+    // Sits to the left of the launcher bubble. A sibling of the bubble
+    // rather than a child of the window, but CSS only reveals it while
+    // #cw-root carries .cw-is-open, so it shows up only once chat is open.
     var poweredBadge = el("div", { id: "cw-powered-badge", text: "⚡ Powered by Branofy" });
 
     var win = el("div", { id: "cw-window", role: "dialog", "aria-label": "Chat" });
