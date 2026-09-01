@@ -107,6 +107,13 @@
   </div>
 
 <script>
+  // Convenience only, never applies outside your own machine: this file is
+  // served as-is from production too, so the autofill is gated on hostname
+  // rather than baking the key into the page itself.
+  if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    document.getElementById("adminKey").value = "1234";
+  }
+
   var faqList = document.getElementById("faqList");
 
   function addFaqRow(question, answer) {
