@@ -379,7 +379,7 @@
     var send = el("button", { id: "cw-send", "aria-label": "Send" });
     send.innerHTML = svg("send", contrastText(config.brandColor), true);
     var inputBar = el("div", { id: "cw-inputbar" }, [input, send]);
-    var footer = el("div", { id: "cw-footer", text: "Powered by chatbot-ai" });
+    var footer = el("div", { id: "cw-footer", text: "⚡ Powered by chatbot-ai" });
     var chatView = el("div", { class: "cw-view", "data-view": "chat" }, [messages, inputBar, footer]);
 
     // --- home view ---
