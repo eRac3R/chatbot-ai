@@ -16,6 +16,10 @@ const { redis, hasRedis } = require("./store");
 //     id, clientId, visitorId,
 //     seq,                       // monotonic counter, never reset by trimming
 //     agent: null | { name, avatarUrl },
+//     agentRequested: boolean,   // visitor asked for a human; AI stops even
+//                                // before one actually joins (agent is set)
+//     locked: boolean,           // conversation auto-ended (see idle
+//                                // timeout below); visitor can no longer post
 //     messages: [ { seq, ts, role, content, sender? } ],
 //     updatedAt
 //   }
@@ -35,6 +39,14 @@ const MAX_LISTED_CONVERSATIONS = 50; // per visitor, in the Messages tab
 // left off instead of finding an empty widget.
 const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS) || 1;
 const SESSION_TTL_SECONDS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60;
+
+// Once a human agent has joined, how long the visitor can go quiet before
+// the conversation auto-ends and locks. Minutes, not the usual days -- this
+// is about a live agent's time, not archival retention.
+const AGENT_IDLE_TIMEOUT_MINUTES = Number(process.env.AGENT_IDLE_TIMEOUT_MINUTES) || 10;
+const AGENT_IDLE_TIMEOUT_MS = Math.max(1, AGENT_IDLE_TIMEOUT_MINUTES) * 60 * 1000;
+const CONVERSATION_ENDED_MESSAGE =
+  "This conversation has ended due to inactivity. Start a new conversation any time.";
 
 const SESSION_KEY = "chatbot:session:";
 const CLIENT_SESSIONS_KEY = "chatbot:client-sessions:";
@@ -57,6 +69,8 @@ function newSession(sessionId, clientId, visitorId) {
     visitorId: visitorId || null,
     seq: 0,
     agent: null,
+    agentRequested: false,
+    locked: false,
     messages: [],
     updatedAt: Date.now(),
   };
@@ -81,11 +95,34 @@ function memPrune() {
 
 async function getSession(sessionId) {
   if (!isValidSessionId(sessionId)) return null;
+  let session;
   if (hasRedis) {
-    return (await redis.get(SESSION_KEY + sessionId)) || null;
+    session = (await redis.get(SESSION_KEY + sessionId)) || null;
+  } else {
+    memPrune();
+    session = memSessions.get(sessionId) || null;
   }
-  memPrune();
-  return memSessions.get(sessionId) || null;
+  if (!session) return null;
+  return maybeAutoCloseIdleSession(session);
+}
+
+// Runs on every read (see getSession), not on a timer -- there's no
+// always-on process to run one, especially on a serverless host. If a human
+// agent is engaged and the visitor hasn't posted in AGENT_IDLE_TIMEOUT_MS,
+// the conversation ends and locks the next time anything touches it (a
+// poll, a send attempt, an agent/admin reading it). A conversation that's
+// never read again while idle just never gets closed -- acceptable, since
+// nothing is waiting on it either.
+async function maybeAutoCloseIdleSession(session) {
+  if (!session.agent || session.locked) return session;
+  const lastUserMessage = session.messages.filter((m) => m.role === "user").pop();
+  if (!lastUserMessage) return session;
+  if (Date.now() - lastUserMessage.ts < AGENT_IDLE_TIMEOUT_MS) return session;
+
+  session.locked = true;
+  session.agent = null;
+  await appendMessage(session, { role: "assistant", content: CONVERSATION_ENDED_MESSAGE });
+  return session;
 }
 
 async function saveSession(session) {
@@ -169,17 +206,39 @@ function messagesSince(session, sinceSeq) {
 
 // ---- agent handoff ----
 
+// Visitor-initiated: "talk to a human". Distinct from assignAgent below --
+// no specific agent is attached yet, but the AI stops responding from this
+// point on (routes/chat.js treats agentRequested the same as agent being
+// set), and a canned message tells the visitor what's happening. Idempotent
+// so tapping the request action twice doesn't post it twice.
+async function requestAgent(session) {
+  if (session.agentRequested || session.agent) return session;
+  session.agentRequested = true;
+  await appendMessage(session, {
+    role: "assistant",
+    content:
+      "Connecting you with a member of our team — feel free to keep " +
+      "typing any questions here, they'll see the whole conversation as " +
+      "soon as they join.",
+  });
+  return session;
+}
+
 // Hand the conversation to a human. Subsequent visitor messages skip the AI
 // entirely and wait for this agent to reply.
 async function assignAgent(session, agent) {
   session.agent = { name: agent.name, avatarUrl: agent.avatarUrl || "" };
+  session.agentRequested = true;
   await saveSession(session);
   return session;
 }
 
-// Give control back to the bot.
+// Give control back to the bot. Clears agentRequested too -- otherwise the
+// AI would stay silent forever, since routes/chat.js treats that flag the
+// same as an agent being attached.
 async function releaseAgent(session) {
   session.agent = null;
+  session.agentRequested = false;
   await saveSession(session);
   return session;
 }
@@ -220,6 +279,8 @@ function summarize(session) {
     id: session.id,
     clientId: session.clientId,
     agent: session.agent,
+    agentRequested: !!session.agentRequested,
+    locked: !!session.locked,
     seq: session.seq,
     messageCount: session.messages.length,
     updatedAt: session.updatedAt,
@@ -265,6 +326,7 @@ module.exports = {
   messagesSince,
   assignAgent,
   releaseAgent,
+  requestAgent,
   listSessions,
   listVisitorConversations,
 };

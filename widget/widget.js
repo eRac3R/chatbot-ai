@@ -62,6 +62,13 @@
   // (reply/poll payload's `agent` field), this swaps to their name/photo.
   var currentResponder = null;
 
+  // Requested-but-not-yet-joined ("connecting…") and ended-and-locked, for
+  // the currently open conversation. Both come from the server (poll/chat
+  // responses) via applyConversationState -- see server/lib/sessions.js for
+  // what sets them (requestAgent, and the idle-timeout auto-close).
+  var conversationAgentRequested = false;
+  var conversationLocked = false;
+
   var els = {};
   var isOpen = false;
   var currentView = "home"; // home | messages | faq | chat
@@ -283,11 +290,17 @@
       ".cw-dot:nth-child(2){animation-delay:.16s}.cw-dot:nth-child(3){animation-delay:.32s}" +
       "@keyframes cw-bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-5px);opacity:1}}" +
 
+      /* talk-to-a-human bar, shown above the composer while the AI is still handling things */
+      "#cw-agent-request-bar{display:flex;justify-content:center;padding:8px 14px;background:#fff;border-top:1px solid #f0f1f4}" +
+      "#cw-agent-request-btn{background:none;border:1.5px solid " + rgba(brand, 0.35) + ";color:" + shade(brand, -0.25) + ";font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:7px 14px;border-radius:16px;transition:all .15s ease}" +
+      "#cw-agent-request-btn:hover{background:" + rgba(brand, 0.08) + ";border-color:" + brand + "}" +
+
       /* composer */
       "#cw-inputbar{display:flex;gap:8px;padding:12px 14px;border-top:1px solid #ecedf1;flex-shrink:0;background:#fff;align-items:flex-end}" +
       "#cw-input{flex:1;border:1.5px solid #e2e4ea;border-radius:22px;padding:10px 15px;font-size:14.5px;outline:none;resize:none;max-height:96px;font-family:inherit;line-height:1.45;color:#1a1c22;transition:border-color .15s ease,box-shadow .15s ease;background:#fafbfc}" +
       "#cw-input:focus{border-color:" + brand + ";background:#fff;box-shadow:0 0 0 3px " + rgba(brand, 0.12) + "}" +
       "#cw-input::placeholder{color:#a8abb6}" +
+      "#cw-input:disabled{background:#f2f3f5;color:#a3a6b1;cursor:not-allowed}" +
       "#cw-send{background:linear-gradient(135deg," + brand + "," + shade(brand, -0.18) + ");border:none;width:40px;height:40px;border-radius:50%;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;transition:transform .15s ease,opacity .15s ease}" +
       "#cw-send:hover:not(:disabled){transform:scale(1.06)}" +
       "#cw-send:disabled{opacity:.45;cursor:default}" +
@@ -346,10 +359,43 @@
   function refreshHeaderIdentity() {
     var responder = currentResponder || { name: config.botName, avatarUrl: config.avatarUrl };
     els.title.textContent = responder.name || config.botName;
-    els.statusText.textContent = currentResponder ? "Live agent" : "Online";
     var fresh = makeAvatar("");
     els.headerAvatar.parentNode.replaceChild(fresh, els.headerAvatar);
     els.headerAvatar = fresh;
+  }
+
+  // Status line + "talk to a live agent" bar + composer lock, all driven by
+  // the same three bits of state: is an agent attached (currentResponder),
+  // has one been requested but not joined yet (conversationAgentRequested),
+  // has the conversation auto-ended (conversationLocked). Called whenever
+  // any of those change while the chat view is showing.
+  function updateChatStatusUI() {
+    if (conversationLocked) {
+      els.statusText.textContent = "Conversation ended";
+    } else if (currentResponder) {
+      els.statusText.textContent = "Live agent";
+    } else if (conversationAgentRequested) {
+      els.statusText.textContent = "Connecting to an agent…";
+    } else {
+      els.statusText.textContent = "Online";
+    }
+    els.status.style.display = "";
+
+    var showRequestBtn = !conversationLocked && !conversationAgentRequested && !currentResponder;
+    els.agentRequestBar.style.display = showRequestBtn ? "flex" : "none";
+
+    els.input.disabled = conversationLocked;
+    els.send.disabled = conversationLocked || sendInFlight;
+    els.input.placeholder = conversationLocked ? "This conversation has ended" : "Type a message…";
+  }
+
+  // Applies agentRequested/locked from a server response (poll, chat, or
+  // request-agent) to the currently open conversation's UI state.
+  function applyConversationState(data) {
+    if (!data) return;
+    if (typeof data.agentRequested === "boolean") conversationAgentRequested = data.agentRequested;
+    if (typeof data.locked === "boolean") conversationLocked = data.locked;
+    if (currentView === "chat") updateChatStatusUI();
   }
 
   // ---- building the UI shell -------------------------------------------
@@ -380,6 +426,11 @@
 
     // --- chat view: an open conversation ---
     var messages = el("div", { id: "cw-messages" });
+
+    var agentRequestBtn = el("button", { id: "cw-agent-request-btn", type: "button", text: "🙋 Talk to a live agent" });
+    agentRequestBtn.addEventListener("click", requestLiveAgent);
+    var agentRequestBar = el("div", { id: "cw-agent-request-bar" }, [agentRequestBtn]);
+
     var input = el("textarea", { id: "cw-input", rows: "1", placeholder: "Type a message…" });
     var send = el("button", { id: "cw-send", "aria-label": "Send" });
     send.innerHTML = svg("send", contrastText(config.brandColor), true);
@@ -388,7 +439,7 @@
     footerHome.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + ICONS.home + "</svg>";
     footerHome.addEventListener("click", function () { showView("home"); });
     var footer = el("div", { id: "cw-footer" }, [footerHome]);
-    var chatView = el("div", { class: "cw-view", "data-view": "chat" }, [messages, inputBar, footer]);
+    var chatView = el("div", { class: "cw-view", "data-view": "chat" }, [messages, agentRequestBar, inputBar, footer]);
 
     // --- home view ---
     var homeList = el("div", { id: "cw-home-list" });
@@ -428,6 +479,7 @@
       tabbar: tabbar, tabs: { home: tabHome, messages: tabMessages, faq: tabHelp },
       tabBadge: tabBadge,
       homeList: homeList, messagesList: messagesList, faqList: faqList,
+      agentRequestBar: agentRequestBar,
     };
 
     buildHome();
@@ -486,6 +538,7 @@
 
     if (name === "chat") {
       refreshHeaderIdentity();
+      updateChatStatusUI();
       scrollToBottom();
       setTimeout(function () { els.input.focus(); }, 120);
     } else {
@@ -692,6 +745,8 @@
     els.messages.innerHTML = "";
     lastSeq = 0;
     currentResponder = null;
+    conversationAgentRequested = false;
+    conversationLocked = false;
   }
 
   // Tappable reply chips shown inline in the chat -- the client's configured
@@ -761,6 +816,7 @@
       .then(function (data) {
         if (!data || conversationId !== currentConversationId) return;
         applyAgent(data.agent);
+        applyConversationState(data);
         (data.messages || []).forEach(function (m) {
           if (m.seq <= lastSeq) return;
           addMessage(m.role === "user" ? "user" : "bot", m.content, m.sender);
@@ -780,7 +836,10 @@
       ? !currentResponder || currentResponder.name !== agent.name
       : !!currentResponder;
     currentResponder = agent ? { name: agent.name, avatarUrl: agent.avatarUrl || "" } : null;
-    if (changed && currentView === "chat") refreshHeaderIdentity();
+    if (changed && currentView === "chat") {
+      refreshHeaderIdentity();
+      updateChatStatusUI();
+    }
   }
 
   function pollOnce() {
@@ -823,7 +882,11 @@
     })
       .then(function (r) {
         return r.json().then(function (data) {
-          if (!r.ok) throw new Error(data.error || "Request failed");
+          if (!r.ok) {
+            var err = new Error(data.error || "Request failed");
+            err.locked = !!data.locked;
+            throw err;
+          }
           return data;
         });
       })
@@ -831,10 +894,12 @@
         hideTyping();
         if (typeof data.seq === "number") lastSeq = Math.max(lastSeq, data.seq);
         if (data.agent && data.agent.name) applyAgent(data.agent);
+        applyConversationState(data);
 
         if (data.pending) {
-          // A human agent owns this conversation -- their answer arrives via
-          // polling when they send it, there's no instant reply to show.
+          // An agent has joined, or the visitor is still waiting for one --
+          // either way their answer arrives via polling, there's no instant
+          // reply to show.
         } else {
           addMessage("bot", data.reply);
           renderReplyChips(data.suggestions);
@@ -844,11 +909,49 @@
       })
       .catch(function (err) {
         hideTyping();
-        addMessage("bot", "Sorry, I ran into a problem: " + err.message);
+        if (err.locked) {
+          // The conversation ended (idle timeout) in the moment between our
+          // last poll and this send. Pull down the "conversation has ended"
+          // message the server already appended, and lock the composer.
+          applyConversationState({ locked: true });
+          fetchOpenConversationMessages(false);
+        } else {
+          addMessage("bot", "Sorry, I ran into a problem: " + err.message);
+        }
       })
       .finally(function () {
         sendInFlight = false;
-        els.send.disabled = false;
+        if (currentView === "chat") updateChatStatusUI();
+      });
+  }
+
+  // "🙋 Talk to a live agent" -- the visitor's side of asking for human
+  // help. The AI stops responding to this conversation immediately (server
+  // enforces this regardless of what the widget does), well before any
+  // specific agent actually joins.
+  function requestLiveAgent() {
+    if (!currentConversationId || conversationLocked || conversationAgentRequested || currentResponder) return;
+    fetch(API_BASE + "/api/sessions/" + encodeURIComponent(currentConversationId) + "/request-agent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ clientId: clientId }),
+    })
+      .then(function (r) {
+        return r.json().then(function (data) {
+          if (!r.ok) throw new Error(data.error || "Could not connect to an agent");
+          return data;
+        });
+      })
+      .then(function (data) {
+        clearReplyChips();
+        applyConversationState(data);
+        fetchConversations();
+        // The canned "connecting…" message was appended server-side; pull it
+        // down the same way any other new message arrives.
+        return fetchOpenConversationMessages(false);
+      })
+      .catch(function (err) {
+        addMessage("bot", "Sorry, I couldn't connect you to an agent: " + err.message);
       });
   }
 

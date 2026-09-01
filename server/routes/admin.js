@@ -131,6 +131,7 @@ router.post("/sessions/:sessionId/takeover", async (req, res) => {
   }
   const session = await getSession(req.params.sessionId);
   if (!session) return res.status(404).json({ error: "Unknown session" });
+  if (session.locked) return res.status(409).json({ error: "This conversation has ended." });
 
   const agent = { name: name.trim().slice(0, 60), avatarUrl: avatarUrl || "" };
   await assignAgent(session, agent);
@@ -153,6 +154,7 @@ router.post("/sessions/:sessionId/reply", async (req, res) => {
   }
   const session = await getSession(req.params.sessionId);
   if (!session) return res.status(404).json({ error: "Unknown session" });
+  if (session.locked) return res.status(409).json({ error: "This conversation has ended." });
   if (!session.agent) {
     return res.status(409).json({ error: "Take the session over before replying" });
   }

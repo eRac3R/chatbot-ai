@@ -11,6 +11,7 @@ const {
   toLlmHistory,
   messagesSince,
   listVisitorConversations,
+  requestAgent,
 } = require("../lib/sessions");
 const { resolveSessionId } = require("../lib/identity");
 
@@ -92,6 +93,30 @@ router.post("/conversations", async (req, res) => {
   }
 });
 
+// Visitor-initiated "talk to a human" -- distinct from the admin-side
+// takeover (server/routes/admin.js), which is what actually attaches a
+// specific agent. This just flags the conversation as waiting and posts a
+// canned message; the AI stops responding to it immediately (see /chat
+// below), before any agent has actually picked it up.
+router.post("/sessions/:sessionId/request-agent", async (req, res) => {
+  const { sessionId } = req.params;
+  const { clientId } = req.body || {};
+
+  if (!isValidSessionId(sessionId) || typeof clientId !== "string") {
+    return res.status(400).json({ error: "clientId is required" });
+  }
+  const session = await getSession(sessionId);
+  if (!session || session.clientId !== clientId) {
+    return res.status(404).json({ error: "Unknown conversation" });
+  }
+  if (session.locked) {
+    return res.status(409).json({ error: "This conversation has ended." });
+  }
+
+  await requestAgent(session);
+  res.json({ agentRequested: session.agentRequested, agent: session.agent, seq: session.seq });
+});
+
 // The widget's Messages tab: every conversation this visitor has had with
 // this client, most recent first. Each entry's `seq` is what the widget
 // diffs against its own locally-stored last-read value to badge unread
@@ -122,7 +147,7 @@ router.get("/sessions/:sessionId/messages", async (req, res) => {
   }
   const session = await getSession(sessionId);
   if (!session) {
-    return res.json({ messages: [], agent: null, seq: 0 });
+    return res.json({ messages: [], agent: null, agentRequested: false, locked: false, seq: 0 });
   }
   if (clientId && session.clientId && session.clientId !== clientId) {
     return res.status(404).json({ error: "Unknown session" });
@@ -131,6 +156,8 @@ router.get("/sessions/:sessionId/messages", async (req, res) => {
   res.json({
     messages: messagesSince(session, since),
     agent: session.agent,
+    agentRequested: session.agentRequested,
+    locked: session.locked,
     seq: session.seq,
   });
 });
@@ -158,6 +185,10 @@ router.post("/chat", async (req, res) => {
     return res.status(404).json({ error: "Unknown conversation. Start one via POST /api/conversations." });
   }
 
+  if (session.locked) {
+    return res.status(409).json({ error: "This conversation has ended.", locked: true });
+  }
+
   if (isRateLimited(sessionId)) {
     return res.status(429).json({ error: "Too many messages, please slow down." });
   }
@@ -165,13 +196,16 @@ router.post("/chat", async (req, res) => {
   try {
     const userMessage = await appendMessage(session, { role: "user", content: message });
 
-    // A human agent has taken this conversation over -- record the visitor's
-    // message and let them answer. The widget picks the reply up by polling
+    // A human agent has taken over, or the visitor has asked for one and is
+    // still waiting -- either way, record the visitor's message and don't
+    // call the AI. The widget picks up an agent's reply (or the "waiting"
+    // canned message posted by requestAgent) by polling
     // /sessions/:id/messages rather than getting it inline here.
-    if (session.agent) {
+    if (session.agent || session.agentRequested) {
       return res.json({
         pending: true,
         agent: session.agent,
+        agentRequested: session.agentRequested,
         sessionId: sessionId,
         seq: userMessage.seq,
       });

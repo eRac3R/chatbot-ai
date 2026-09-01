@@ -207,8 +207,27 @@ visitor buckets.
 
 ### Live agent handoff
 
-The backend for human takeover is built; the agent-facing UI is not. A human
-can already take a conversation over end to end through the API:
+The backend for human takeover is built; the agent-facing UI is not. Two
+ways a conversation ends up in front of a human:
+
+**Visitor-requested.** A "🙋 Talk to a live agent" button is shown in the
+chat while the AI is still handling things. Tapping it calls
+`POST /api/sessions/:id/request-agent` (`{clientId}`, no admin key --
+this is visitor-facing), which:
+- Flags the conversation `agentRequested: true`.
+- Posts a canned message: *"Connecting you with a member of our team —
+  feel free to keep typing any questions here, they'll see the whole
+  conversation as soon as they join."*
+- **Stops the AI immediately** — `POST /api/chat` treats `agentRequested`
+  the same as an agent already being attached (`agent || agentRequested`)
+  and returns `{pending: true}` without calling Gemini, even before any
+  specific agent has actually joined. The visitor can keep typing; it's
+  just queued for whoever picks it up.
+- The widget reflects this with a header status of "Connecting to an
+  agent…", and hides the request button (`updateChatStatusUI` in
+  `widget.js`) so it can't be tapped twice.
+
+**Operator-initiated**, via the same admin endpoints as before:
 
 | Endpoint | What it does |
 | --- | --- |
@@ -216,13 +235,13 @@ can already take a conversation over end to end through the API:
 | `GET /api/admin/sessions/:id` | Full transcript for one conversation |
 | `POST /api/admin/sessions/:id/takeover` | `{name, avatarUrl?, greeting?}` — the AI stops answering this session |
 | `POST /api/admin/sessions/:id/reply` | `{message}` — agent replies by hand |
-| `POST /api/admin/sessions/:id/release` | Hands control back to the bot |
+| `POST /api/admin/sessions/:id/release` | Hands control back to the bot (also clears `agentRequested`, or the AI would stay silent forever) |
 
-Once an agent takes over, `POST /api/chat` stops calling Gemini for that
-session and returns `{pending: true, agent}`; the visitor's widget swaps the
-header and message avatars to the agent's name/photo and waits for their
-reply via polling. Bot messages keep the bot's avatar, so the history stays
-readable as a mixed conversation.
+Once an agent actually joins (`assignAgent`), `POST /api/chat` stops calling
+Gemini for that session and returns `{pending: true, agent}`; the visitor's
+widget swaps the header and message avatars to the agent's name/photo and
+waits for their reply via polling. Bot messages keep the bot's avatar, so
+the history stays readable as a mixed conversation.
 
 When control is released, the bot picks up with the agent's messages in its
 context. Those are labelled `(human agent NAME):` in the history
@@ -234,14 +253,31 @@ discounts" moments after an agent granted 15% off). It will now honor and
 reference the agent's promise while still refusing to invent a bigger one
 itself.
 
-Two things to know before putting agents in front of customers:
-- These endpoints share `ADMIN_KEY`. A real agent UI should get its own
-  per-agent auth — support staff shouldn't be able to edit knowledge bases
-  or read other clients' data.
+**Idle timeout.** Once an agent has joined, if the visitor goes quiet for
+`AGENT_IDLE_TIMEOUT_MINUTES` (default 10), the conversation auto-ends: a
+"This conversation has ended due to inactivity" message is posted, the
+agent is released, and the conversation is permanently `locked` — the
+widget disables its composer, and `POST /api/chat` / the admin `/reply`
+endpoint both 409 on it from then on. There's no timer process (doesn't
+exist in a serverless world); the check runs lazily inside `getSession`
+(`maybeAutoCloseIdleSession`), i.e. the *next* time anything touches the
+conversation — a poll, a send attempt, an agent reading it — not necessarily
+exactly 10 minutes to the second. The timeout only applies once an agent
+has actually joined; a visitor who requested one and is still waiting can
+wait indefinitely.
+
+Three things to know before putting agents in front of customers:
+- These admin endpoints share `ADMIN_KEY`. A real agent UI should get its
+  own per-agent auth — support staff shouldn't be able to edit knowledge
+  bases or read other clients' data. The visitor-facing `request-agent`
+  endpoint needs no key, by design — any visitor can ask.
 - Delivery is 4-second polling while the widget is open, not websockets.
   Fine at small scale and it works on Vercel (which doesn't hold persistent
   connections); revisit if you need instant delivery or have many concurrent
   chats.
+- The idle timeout is per-conversation wall-clock time based on the
+  visitor's last message, not tied to the widget being open — closing the
+  browser doesn't pause the clock.
 
 ## Setup
 
