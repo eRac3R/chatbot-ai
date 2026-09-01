@@ -10,6 +10,7 @@ const {
   toLlmHistory,
   messagesSince,
 } = require("../lib/sessions");
+const { resolveSessionId } = require("../lib/identity");
 
 const router = express.Router();
 
@@ -34,6 +35,30 @@ router.get("/clients/:id/public", async (req, res) => {
   const config = await getPublicClient(req.params.id);
   if (!config) return res.status(404).json({ error: "Unknown client id" });
   res.json(config);
+});
+
+// The widget calls this once on load to find out which conversation it's
+// looking at. With a verified logged-in user that's their cross-device
+// session; otherwise it's the anonymous id from their browser storage.
+router.post("/session/resolve", async (req, res) => {
+  const { clientId, userId, userHash } = req.body || {};
+  let { sessionId } = req.body || {};
+
+  if (typeof clientId !== "string") {
+    return res.status(400).json({ error: "clientId is required" });
+  }
+  const clientConfig = await getClient(clientId);
+  if (!clientConfig) return res.status(404).json({ error: "Unknown client id" });
+
+  if (!isValidSessionId(sessionId)) sessionId = crypto.randomUUID();
+
+  const resolved = resolveSessionId({
+    clientConfig,
+    userId,
+    userHash,
+    anonymousSessionId: sessionId,
+  });
+  res.json({ sessionId: resolved.sessionId, identified: resolved.identified });
 });
 
 // The widget polls this while it's open, to pick up messages it didn't get

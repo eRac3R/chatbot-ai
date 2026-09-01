@@ -1,5 +1,6 @@
 const fs = require("fs");
 const path = require("path");
+const crypto = require("crypto");
 const { redis, hasRedis } = require("./store");
 
 const DATA_DIR = path.join(__dirname, "..", "data", "clients");
@@ -101,7 +102,22 @@ async function redisDeleteClient(clientId) {
 
 async function getClient(clientId) {
   if (!isValidClientId(clientId)) return null;
-  return hasRedis ? redisGetClient(clientId) : fileGetClient(clientId);
+  const client = hasRedis ? await redisGetClient(clientId) : fileGetClient(clientId);
+  if (!client) return null;
+
+  // Clients created before identity verification existed have no secret, so
+  // signature checks would silently never pass for them. Mint one on first
+  // read and persist it, so this is a one-time backfill rather than a
+  // permanently broken feature for older clients.
+  if (!client.identitySecret) {
+    client.identitySecret = crypto.randomBytes(32).toString("hex");
+    if (hasRedis) {
+      await redisUpsertClient(client);
+    } else {
+      fileUpsertClient(client);
+    }
+  }
+  return client;
 }
 
 // Fields safe to expose to the public widget (no internal notes, no admin metadata).
@@ -138,6 +154,11 @@ async function upsertClient(config) {
       config.quickReplies !== undefined
         ? sanitizeQuickReplies(config.quickReplies)
         : existing.quickReplies ?? ["Hi!"],
+    // Shared secret the business's own backend uses to sign the id of a
+    // logged-in user, proving the widget really is that person before we
+    // hand over their cross-device chat history. Generated once, never
+    // exposed through the public widget config. See lib/identity.js.
+    identitySecret: existing.identitySecret || crypto.randomBytes(32).toString("hex"),
     updatedAt: new Date().toISOString(),
   };
   if (hasRedis) {

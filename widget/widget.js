@@ -22,7 +22,17 @@
   var API_BASE = new URL(currentScript.src).origin;
   var STORAGE_KEY = "chatwidget_session_" + clientId;
 
-  function getSessionId() {
+  // Optional: if the embedding site has its own logged-in users, it can pass
+  // the user's id plus an HMAC of it (signed server-side with the client's
+  // identitySecret) so that person's history follows them across devices.
+  // Without these, history is anonymous and per-browser as usual.
+  var userId = currentScript.getAttribute("data-user-id") || "";
+  var userHash = currentScript.getAttribute("data-user-hash") || "";
+
+  // Anonymous per-device id, used when nobody is logged in -- and kept
+  // untouched while they are, so logging out returns them to their own
+  // anonymous thread rather than leaking the logged-in one.
+  function getAnonymousSessionId() {
     try {
       var id = window.localStorage.getItem(STORAGE_KEY);
       if (!id) {
@@ -35,7 +45,7 @@
     }
   }
 
-  var sessionId = getSessionId();
+  var sessionId = getAnonymousSessionId();
   var config = {
     botName: "Assistant",
     welcomeMessage: "Hi! How can I help?",
@@ -462,13 +472,45 @@
       });
   }
 
-  function init() {
-    fetch(API_BASE + "/api/clients/" + encodeURIComponent(clientId) + "/public")
-      .then(function (r) {
-        if (!r.ok) throw new Error("client not found");
-        return r.json();
-      })
+  // Ask the server which conversation this visitor owns. With verified
+  // identity that's their cross-device thread; otherwise the anonymous one.
+  function resolveSession() {
+    if (!userId) return Promise.resolve();
+    return fetch(API_BASE + "/api/session/resolve", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        clientId: clientId,
+        sessionId: sessionId,
+        userId: userId,
+        userHash: userHash,
+      }),
+    })
+      .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
+        if (data && data.sessionId) sessionId = data.sessionId;
+        if (data && userId && !data.identified) {
+          console.warn(
+            "[chat-widget] data-user-id was supplied but its data-user-hash did not " +
+            "verify, so chat history stays per-device. Sign the user id with this " +
+            "client's identitySecret on your server."
+          );
+        }
+      })
+      .catch(function () { /* stay on the anonymous session */ });
+  }
+
+  function init() {
+    Promise.all([
+      resolveSession(),
+      fetch(API_BASE + "/api/clients/" + encodeURIComponent(clientId) + "/public")
+        .then(function (r) {
+          if (!r.ok) throw new Error("client not found");
+          return r.json();
+        }),
+    ])
+      .then(function (results) {
+        var data = results[1];
         config.botName = data.botName || config.botName;
         config.welcomeMessage = data.welcomeMessage || config.welcomeMessage;
         config.brandColor = data.brandColor || config.brandColor;

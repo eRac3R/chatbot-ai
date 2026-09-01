@@ -19,8 +19,14 @@ const { redis, hasRedis } = require("./store");
 
 const MAX_MESSAGES = 60; // retained for agent context / visitor reloads
 const LLM_MAX_MESSAGES = 20; // what we actually feed the model (10 turns)
-const SESSION_TTL_SECONDS = 24 * 60 * 60; // agents may pick a chat up hours later
 const MAX_LISTED_SESSIONS = 100;
+
+// How long a conversation sticks around after its last message. Expiry is
+// sliding -- every write pushes it out again -- so this is "idle for N days",
+// not "N days since it started". A returning visitor picks up where they
+// left off instead of finding an empty widget.
+const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS) || 30;
+const SESSION_TTL_SECONDS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60;
 
 const SESSION_KEY = "chatbot:session:";
 const CLIENT_SESSIONS_KEY = "chatbot:client-sessions:";

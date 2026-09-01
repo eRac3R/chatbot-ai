@@ -68,6 +68,57 @@ automatically:
   layer) won't extract anything — you'd need to retype that content or paste
   it manually.
 
+### Chat history and cross-device continuity
+
+By default a visitor's conversation is stored server-side against a random id
+kept in their browser's `localStorage`, so it survives reloads and closing
+the widget, and is restored when they come back. Retention is **30 days of
+inactivity** by default (`SESSION_TTL_DAYS`), sliding — every new message
+pushes the expiry out again.
+
+That's per-browser by nature. To let one person's history follow them from
+laptop to phone, the embedding site tells the widget who its logged-in user
+is:
+
+```html
+<script src="https://YOUR-DOMAIN/widget.js"
+        data-client-id="acme-co"
+        data-user-id="alice@example.com"
+        data-user-hash="<hmac>"></script>
+```
+
+`data-user-id` alone can't be trusted — it sits in the page and anyone could
+edit it in devtools to open someone else's transcript. So the site also
+sends an HMAC of that id, computed **on its own server** with the client's
+`identitySecret` (visible on `GET /api/admin/clients/:id`, never exposed to
+the widget):
+
+```js
+// on the business's own backend, when rendering the page
+const userHash = require("crypto")
+  .createHmac("sha256", IDENTITY_SECRET)   // from GET /api/admin/clients/:id
+  .update(loggedInUser.email)              // must match data-user-id exactly
+  .digest("hex");
+```
+
+Behaviour, all verified end to end:
+- **Valid hash** → the visitor gets a stable session derived from that user,
+  identical on every device, with full history and conversational context.
+- **Missing or wrong hash** → falls back to the anonymous per-device session
+  and logs a console warning. A misconfigured site loses history continuity;
+  it doesn't break the chat and it never exposes the real user's transcript.
+- **Logged out** → back to the anonymous session for that browser. The
+  logged-in history is untouched server-side and returns on next login; the
+  logged-out thread never shows it.
+
+The user session id is itself an HMAC of `identitySecret`, not a plain hash
+of `clientId + userId`. That matters: session ids are treated as bearer
+credentials elsewhere in the API, so a guessable one would let anyone who
+knows a victim's email read their chat without ever passing verification.
+
+Not implemented: merging an anonymous conversation into the user's history
+when they log in mid-chat. Today that starts a fresh logged-in thread.
+
 ### Live agent handoff
 
 The backend for human takeover is built; the agent-facing UI is not. A human
