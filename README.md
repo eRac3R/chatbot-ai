@@ -87,14 +87,16 @@ A bottom tab bar with three peer tabs, plus a conversation view reached by
 drilling into either of them:
 
 - **Home** — quick answers without needing to chat: bot greeting, a
-  "Message us directly" tile, its top 3 FAQs (`HOME_FAQ_COUNT` in
-  `widget.js`) as an inline expand/collapse accordion, and a live search
-  box below them that filters the *full* FAQ list as you type (not just
-  the top 3) — matches are shown as the same expandable accordion, right
-  under the search box, no page navigation. Tapping a top-3 or search-result
-  question shows the answer right there. The FAQ section (and search box)
-  is omitted entirely for a client with no FAQs configured, but the
-  "Message us directly" tile always stays so Home is never a dead end.
+  "Message us directly" tile, then a single "Top questions" section — a
+  search box immediately followed by its top 3 FAQs (`HOME_FAQ_COUNT` in
+  `widget.js`) as an inline expand/collapse accordion. Typing in the search
+  box swaps that same spot for one bordered dropdown box listing every
+  matching FAQ (not just the top 3), each row expandable in place; the box
+  scrolls internally (capped height) once results run past the visible
+  area, staying clear of the tab bar below. Clearing the box reverts to the
+  top-3 view. The whole section is omitted for a client with no FAQs
+  configured, but the "Message us directly" tile always stays so Home is
+  never a dead end.
 - **Messages** — where a visitor actually starts or continues talking. A
   "Send us a message" tile sits above a "Past conversations" list: every
   conversation this visitor has had, most recent first, with a preview of

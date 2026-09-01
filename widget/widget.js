@@ -224,9 +224,18 @@
       "#cw-home-search{width:100%;box-sizing:border-box;border:1.5px solid #e2e4ea;border-radius:12px;padding:10px 14px;font-size:14px;font-family:inherit;outline:none;background:#fff;color:#1a1c22;transition:border-color .15s ease,box-shadow .15s ease}" +
       "#cw-home-search:focus{border-color:" + brand + ";box-shadow:0 0 0 3px " + rgba(brand, 0.12) + "}" +
       "#cw-home-search::placeholder{color:#a8abb6}" +
-      "#cw-home-search-results{display:flex;flex-direction:column;gap:8px}" +
-      "#cw-home-search-results:empty{display:none}" +
+      "#cw-home-faq-box{display:flex;flex-direction:column;gap:8px;margin-top:8px}" +
+      "#cw-home-faq-box:empty{display:none}" +
       ".cw-search-empty{padding:10px 4px;font-size:13px;color:#a3a6b1;text-align:center}" +
+      /* search results: one bordered box, rows instead of separate cards, capped height so a long list scrolls internally rather than pushing the tab bar off screen */
+      "#cw-search-dropdown-box{background:#fff;border:1px solid #e8e9ee;border-radius:14px;max-height:230px;overflow-y:auto}" +
+      ".cw-dropdown-row{border-bottom:1px solid #f0f1f4}" +
+      ".cw-dropdown-row.cw-last{border-bottom:none}" +
+      ".cw-dropdown-q{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;padding:12px 14px;cursor:pointer;font-family:inherit;font-size:13.5px;font-weight:550;color:#1a1c22;line-height:1.4}" +
+      ".cw-dropdown-q span{flex:1}" +
+      ".cw-dropdown-row .cw-faq-a{padding:0 14px 12px}" +
+      ".cw-dropdown-row.cw-open .cw-faq-a{display:block;animation:cw-in .22s ease}" +
+      ".cw-dropdown-row.cw-open .cw-faq-caret{transform:rotate(180deg)}" +
 
       /* quick-question chips (Home) */
       ".cw-chip{background:#fff;border:1.5px solid " + rgba(brand, 0.35) + ";color:" + shade(brand, -0.25) + ";padding:8px 14px;border-radius:16px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease;line-height:1.3}" +
@@ -586,12 +595,18 @@
 
   // Shared by Home's "Top questions" preview and Help's full list -- an
   // expand/collapse accordion, answer shown inline, no conversation started.
+  // Down-pointing caret for expand/collapse rows -- distinct from chevron()
+  // above, which is the right-pointing "this navigates somewhere" arrow.
+  function faqCaret() {
+    var caret = el("i", { class: "cw-faq-caret" });
+    caret.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>';
+    return caret;
+  }
+
   function renderFaqItems(container, faqs) {
     faqs.forEach(function (faq) {
       var q = el("button", { class: "cw-faq-q", type: "button" }, [el("span", { text: faq.question })]);
-      var caret = el("i", { class: "cw-faq-caret" });
-      caret.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>';
-      q.appendChild(caret);
+      q.appendChild(faqCaret());
       var a = el("div", { class: "cw-faq-a", text: faq.answer });
       var item = el("div", { class: "cw-faq-item" }, [q, a]);
       q.addEventListener("click", function () { item.classList.toggle("cw-open"); });
@@ -619,43 +634,61 @@
     ));
 
     var topFaqs = (config.faqs || []).slice(0, HOME_FAQ_COUNT);
-    if (topFaqs.length) {
+    if (config.faqs && config.faqs.length) {
       els.homeList.appendChild(el("div", { class: "cw-home-subhead", text: "Top questions" }));
-      renderFaqItems(els.homeList, topFaqs);
 
-      // Searches the FULL faq list (not just the top 3 above), live as the
-      // visitor types -- a way to find something not in the top picks
-      // without leaving Home or opening a conversation.
-      els.homeList.appendChild(el("div", { class: "cw-home-subhead", text: "Search all questions" }));
+      // Search sits directly under the heading; results render into the
+      // SAME box below it -- the top 3 by default, replaced by matches
+      // (searched across the full faq list, not just those 3) as soon as
+      // the visitor types anything.
       var searchInput = el("input", {
-        type: "text", id: "cw-home-search", placeholder: "e.g. shipping, pricing, returns…", autocomplete: "off",
+        type: "text", id: "cw-home-search", placeholder: "Search questions…", autocomplete: "off",
       });
-      var searchResults = el("div", { id: "cw-home-search-results" });
-      searchInput.addEventListener("input", function () {
-        renderHomeSearchResults(searchInput.value.trim(), searchResults);
-      });
+      var resultsBox = el("div", { id: "cw-home-faq-box" });
       els.homeList.appendChild(searchInput);
-      els.homeList.appendChild(searchResults);
+      els.homeList.appendChild(resultsBox);
+
+      renderFaqItems(resultsBox, topFaqs); // default state
+
+      searchInput.addEventListener("input", function () {
+        var query = searchInput.value.trim();
+        resultsBox.innerHTML = "";
+        if (!query) {
+          renderFaqItems(resultsBox, topFaqs);
+          return;
+        }
+        var q = query.toLowerCase();
+        var matches = config.faqs
+          .filter(function (f) {
+            return f.question.toLowerCase().indexOf(q) !== -1 || f.answer.toLowerCase().indexOf(q) !== -1;
+          })
+          .slice(0, MAX_SEARCH_RESULTS);
+        renderSearchDropdown(resultsBox, matches);
+      });
     }
   }
 
-  var MAX_SEARCH_RESULTS = 5;
+  var MAX_SEARCH_RESULTS = 6;
 
-  function renderHomeSearchResults(query, resultsEl) {
-    resultsEl.innerHTML = "";
-    if (!query) return;
-    var q = query.toLowerCase();
-    var matches = (config.faqs || [])
-      .filter(function (f) {
-        return f.question.toLowerCase().indexOf(q) !== -1 || f.answer.toLowerCase().indexOf(q) !== -1;
-      })
-      .slice(0, MAX_SEARCH_RESULTS);
-
+  // While searching, matches render as ONE bordered dropdown box (rows
+  // separated by dividers, not individual cards like the default top-3
+  // view) capped to a max-height with internal scroll -- so a long result
+  // list scrolls within itself instead of pushing the tab bar off screen.
+  function renderSearchDropdown(container, matches) {
     if (!matches.length) {
-      resultsEl.appendChild(el("div", { class: "cw-search-empty", text: "No matching questions" }));
+      container.appendChild(el("div", { class: "cw-search-empty", text: "No matching questions" }));
       return;
     }
-    renderFaqItems(resultsEl, matches);
+    var box = el("div", { id: "cw-search-dropdown-box" });
+    matches.forEach(function (faq, i) {
+      var q = el("button", { class: "cw-dropdown-q", type: "button" }, [el("span", { text: faq.question })]);
+      q.appendChild(faqCaret());
+      var a = el("div", { class: "cw-faq-a", text: faq.answer });
+      var row = el("div", { class: "cw-dropdown-row" + (i === matches.length - 1 ? " cw-last" : "") }, [q, a]);
+      q.addEventListener("click", function () { row.classList.toggle("cw-open"); });
+      box.appendChild(row);
+    });
+    container.appendChild(box);
   }
 
   // Help: the full FAQ library, same accordion, same "ask a human" fallback.
