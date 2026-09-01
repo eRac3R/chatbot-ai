@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { getClient, getPublicClient } = require("../lib/clients");
-const { getChatReply } = require("../lib/gemini");
+const { getChatReply, getSuggestedReplies } = require("../lib/gemini");
 const {
   isValidSessionId,
   isValidVisitorId,
@@ -15,6 +15,12 @@ const {
 const { resolveSessionId } = require("../lib/identity");
 
 const router = express.Router();
+
+// Suggested-reply chips only make sense while a visitor is still getting
+// oriented -- past this many user messages in a conversation, skip
+// generating them entirely (saves a model call and avoids clutter in a
+// longer, more specific conversation).
+const MAX_SUGGESTION_TURNS = 3;
 
 // Very small fixed-window rate limiter per session, to keep the demo/API
 // from being trivially hammered. Not a substitute for a real gateway limiter.
@@ -172,10 +178,18 @@ router.post("/chat", async (req, res) => {
     }
 
     const history = toLlmHistory(session).slice(0, -1); // exclude the message we just added
-    const reply = await getChatReply({ clientConfig, history, userMessage: message });
+    const turnNumber = session.messages.filter((m) => m.role === "user").length;
+    const wantSuggestions = turnNumber <= MAX_SUGGESTION_TURNS;
+
+    const [reply, suggestions] = await Promise.all([
+      getChatReply({ clientConfig, history, userMessage: message }),
+      wantSuggestions
+        ? getSuggestedReplies({ clientConfig, history, userMessage: message })
+        : Promise.resolve([]),
+    ]);
     const botMessage = await appendMessage(session, { role: "assistant", content: reply });
 
-    res.json({ reply, sessionId, seq: botMessage.seq });
+    res.json({ reply, sessionId, seq: botMessage.seq, suggestions });
   } catch (err) {
     console.error("chat error:", err.message);
     res.status(500).json({ error: "Sorry, something went wrong generating a reply." });

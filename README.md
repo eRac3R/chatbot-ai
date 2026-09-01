@@ -50,8 +50,9 @@ any website; each business gets its own knowledge base (product info + FAQs).
     still win, so a persona can't talk the bot into inventing facts.
   - **Quick reply buttons** (`quickReplies`) — up to 4 suggested questions,
     always exactly 4 (blank slots fall back to defaults, see
-    `sanitizeQuickReplies`). Rendered on the Messages tab (see below) as
-    conversation-starter chips.
+    `sanitizeQuickReplies`). Rendered *inside* a freshly-started conversation,
+    under the welcome message (see Widget navigation below) — tapping one
+    sends it immediately.
   - **FAQs** now do triple duty: they go into the AI's prompt, the widget
     shows the top 3 as an inline preview on Home, and the full list as a
     browsable Help tab (see below).
@@ -93,20 +94,43 @@ drilling into either of them:
   the whole section) is omitted for a client with no FAQs configured, but
   the fallback link always stays so Home is never a dead end.
 - **Messages** — where a visitor actually starts or continues talking. A
-  "Send us a message" tile and the client's quick-reply chips (tapping one
-  starts a new conversation and sends that question as its first message)
-  sit above a "Past conversations" list: every conversation this visitor
-  has had, most recent first, with a preview of the last message and a red
-  unread-count badge (on both the tab icon and the individual row) for
-  anything with activity the visitor hasn't seen yet. Tapping a past
-  conversation reopens its full transcript.
+  "Send us a message" tile sits above a "Past conversations" list: every
+  conversation this visitor has had, most recent first, with a preview of
+  the last message and a red unread-count badge (on both the tab icon and
+  the individual row) for anything with activity the visitor hasn't seen
+  yet. Tapping a past conversation reopens its full transcript.
 - **Help** — the client's *full* FAQ list, same accordion as Home's preview,
   ending in the same "Still need help? Ask our assistant →" fallback.
   Whatever doesn't fit in Home's top-3 lives here.
 - **An open conversation** is a fourth, "pushed" view — the tab bar hides
   and a back arrow takes its place in the header, returning to whichever
   tab it was opened from (tracked separately per conversation, so opening
-  one from Home vs. Messages returns to the right place).
+  one from Home vs. Messages returns to the right place). Starting a fresh
+  conversation shows the welcome message followed by the client's
+  quick-reply chips (`config.quickReplies`), inline in the chat, exactly
+  where the old pre-tab-bar widget showed them — tapping one sends it
+  immediately as the first message.
+
+**Reply suggestions ("smart replies").** After each AI reply (not during a
+live-agent handoff), the server may also return up to 2 short, contextual
+follow-up suggestions the visitor can tap instead of typing — e.g. after
+"we ship within the US", a suggestion might be "Do you ship to Canada?".
+These render the same way as the quick-reply chips, right under the bot's
+message, and tapping one sends it and clears the set. Implementation notes:
+- `getSuggestedReplies` (`server/lib/gemini.js`) is a second, separate
+  Gemini call, deliberately isolated from `getChatReply` — if it fails or
+  returns unparseable output, suggestions are silently empty rather than
+  ever affecting the real reply. It runs concurrently with the reply call
+  (`Promise.all` in `routes/chat.js`), so it costs no extra latency.
+- Capped to a conversation's **first 3 user messages**
+  (`MAX_SUGGESTION_TURNS`) — past that, the extra call is skipped
+  entirely (not just hidden client-side) to avoid unnecessary cost in a
+  longer, more specific conversation.
+- The model is instructed to phrase suggestions as something the *visitor*
+  would type (a question, or a short reply like "sounds good"), grounded
+  only in the business info, and to return an empty array rather than
+  force a suggestion that doesn't fit — verified it doesn't always produce
+  2 (or any) on every turn, which is expected, not a bug.
 
 A visitor can have **many conversations**, not just one — this is the real
 architectural change from earlier versions, where a visitor had exactly one

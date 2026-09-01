@@ -272,6 +272,9 @@
       ".cw-msg-bot{background:#fff;color:#1a1c22;border:1px solid #e8e9ee;border-bottom-left-radius:6px;box-shadow:0 1px 2px rgba(0,0,0,.04)}" +
       ".cw-msg-user{background:linear-gradient(135deg," + brand + "," + shade(brand, -0.15) + ");color:" + onBrand + ";border-bottom-right-radius:6px}" +
 
+      /* inline reply chips (quick-start questions + AI-suggested follow-ups) */
+      ".cw-inline-chips{display:flex;flex-wrap:wrap;gap:7px;padding:2px 0 2px 34px;animation:cw-in .3s ease}" +
+
       /* typing indicator */
       ".cw-typing{background:#fff;border:1px solid #e8e9ee;border-bottom-left-radius:6px;border-radius:18px;padding:13px 16px;display:flex;gap:4px;align-items:center}" +
       ".cw-dot{width:7px;height:7px;border-radius:50%;background:#b6b9c4;animation:cw-bounce 1.3s infinite ease-in-out}" +
@@ -556,7 +559,9 @@
   // Messages: where a visitor actually starts or continues talking -- the
   // "Send us a message" CTA and quick-question starters live here (moved
   // off Home, which is now purely the quick-answers screen above), followed
-  // by their past conversations.
+  // by their past conversations. The quick-reply chips used to live here too
+  // -- they're now shown inside a freshly-started conversation itself (see
+  // startNewConversation), alongside dynamically suggested follow-ups.
   function renderMessagesList() {
     els.messagesList.innerHTML = "";
 
@@ -564,17 +569,6 @@
       ICONS.chat, "Send us a message", "Start a new conversation",
       function () { startNewConversation(); }
     ));
-
-    if (config.quickReplies && config.quickReplies.length) {
-      els.messagesList.appendChild(el("div", { class: "cw-home-subhead", text: "Quick questions" }));
-      var wrap = el("div", { class: "cw-home-quick" });
-      config.quickReplies.forEach(function (q) {
-        var chip = el("button", { class: "cw-chip", type: "button", text: q });
-        chip.addEventListener("click", function () { startNewConversation(q); });
-        wrap.appendChild(chip);
-      });
-      els.messagesList.appendChild(wrap);
-    }
 
     els.messagesList.appendChild(el("div", { class: "cw-home-subhead", text: "Past conversations" }));
 
@@ -685,10 +679,33 @@
     currentResponder = null;
   }
 
-  // Home's "Send us a message", tapping a quick question there, and the
-  // Help tab's "Ask our assistant" link all land here -- always a genuinely
-  // new conversation, never reusing whatever was open before.
-  function startNewConversation(initialMessage) {
+  // Tappable reply chips shown inline in the chat -- the client's configured
+  // quick-reply questions under the welcome message when a conversation
+  // starts, and (separately) up to 2 AI-suggested follow-ups under a bot
+  // reply. Only one set is ever on screen: sending anything, by chip or by
+  // typing, clears whatever's currently shown.
+  function clearReplyChips() {
+    var wrap = document.getElementById("cw-reply-chips");
+    if (wrap) wrap.remove();
+  }
+
+  function renderReplyChips(options) {
+    if (!options || !options.length) return;
+    clearReplyChips();
+    var wrap = el("div", { id: "cw-reply-chips", class: "cw-inline-chips" });
+    options.forEach(function (text) {
+      var chip = el("button", { class: "cw-chip", type: "button", text: text });
+      chip.addEventListener("click", function () { submitText(text); });
+      wrap.appendChild(chip);
+    });
+    els.messages.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  // Home's "Message us directly", Messages' "Send us a message", and Help's
+  // "Ask our assistant" link all land here -- always a genuinely new
+  // conversation, never reusing whatever was open before.
+  function startNewConversation() {
     resetChatView();
     currentConversationId = null;
     showView("chat");
@@ -704,7 +721,7 @@
         if (!res.ok) throw new Error(res.data.error || "Could not start a conversation");
         currentConversationId = res.data.sessionId;
         fetchConversations();
-        if (initialMessage) submitText(initialMessage);
+        renderReplyChips(config.quickReplies);
       })
       .catch(function (err) {
         addMessage("bot", "Sorry, I couldn't start a new conversation: " + err.message);
@@ -778,6 +795,7 @@
 
   function submitText(text) {
     if (!currentConversationId) return; // conversation still being created; ignore stray input
+    clearReplyChips();
     addMessage("user", text);
     els.send.disabled = true;
     sendInFlight = true;
@@ -804,6 +822,7 @@
           // polling when they send it, there's no instant reply to show.
         } else {
           addMessage("bot", data.reply);
+          renderReplyChips(data.suggestions);
         }
         markRead(currentConversationId, data.seq);
         fetchConversations(); // refresh Messages preview/order right away

@@ -61,6 +61,48 @@ function toGeminiContents(history, userMessage) {
   return contents;
 }
 
+// Short, tappable follow-up suggestions ("smart replies") shown as chips
+// under the bot's message -- the visitor taps instead of typing. A separate,
+// cheap call rather than folding into getChatReply's response: it can fail
+// or return garbage without ever touching the actual reply, and the two run
+// concurrently (see routes/chat.js) so it costs no extra latency.
+async function getSuggestedReplies({ clientConfig, history, userMessage }) {
+  const ai = getClient();
+  const model = process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
+
+  const prompt = [
+    `You suggest short reply options for a visitor chatting with ${clientConfig.botName || "a support bot"} on ${clientConfig.id}'s website.`,
+    `Given the conversation so far, suggest up to 2 short, natural follow-up messages the VISITOR might send next -- ideally under 8 words.`,
+    `Every suggestion MUST be phrased as something the VISITOR would type TO the bot -- a question, or a short reply like "yes please" / "sounds good". Never phrase one as an answer, a statement of fact, or anything that reads like it came FROM the bot.`,
+    `Ground every suggestion in the business info below; never suggest asking about something not covered there. If nothing sensible fits, return an empty array.`,
+    ``,
+    `=== BUSINESS INFO ===`,
+    clientConfig.businessInfo || "(none)",
+    ``,
+    `Respond with ONLY a JSON array of 0-2 short strings, nothing else -- no markdown fences, no commentary.`,
+    `Good example: ["Do you ship internationally?", "How much does it cost?"]`,
+    `Bad example (these are statements, not visitor messages): ["Shipping is free.", "Plans start at $16."]`,
+  ].join("\n");
+
+  try {
+    const response = await ai.models.generateContent({
+      model,
+      contents: toGeminiContents(history, userMessage),
+      config: { systemInstruction: prompt, maxOutputTokens: 100 },
+    });
+    const text = (response.text || "").trim();
+    const match = text.match(/\[[\s\S]*\]/);
+    const parsed = JSON.parse(match ? match[0] : text);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((s) => typeof s === "string" && s.trim())
+      .slice(0, 2)
+      .map((s) => s.trim().slice(0, 80));
+  } catch {
+    return []; // a nice-to-have; never let a bad/unparseable response affect the real reply
+  }
+}
+
 async function getChatReply({ clientConfig, history, userMessage }) {
   const ai = getClient();
   // "-lite" trades some quality for much lower latency (~1s vs ~20s in
@@ -80,4 +122,4 @@ async function getChatReply({ clientConfig, history, userMessage }) {
   return response.text || "";
 }
 
-module.exports = { getChatReply, buildSystemPrompt };
+module.exports = { getChatReply, getSuggestedReplies, buildSystemPrompt };
