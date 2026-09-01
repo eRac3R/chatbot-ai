@@ -117,10 +117,19 @@ async function maybeAutoCloseIdleSession(session) {
   if (!session.agent || session.locked) return session;
   const lastUserMessage = session.messages.filter((m) => m.role === "user").pop();
   if (!lastUserMessage) return session;
-  if (Date.now() - lastUserMessage.ts < AGENT_IDLE_TIMEOUT_MS) return session;
+
+  // Measure idleness from whichever came last: the visitor's last message
+  // or the moment an agent actually joined. Using the message alone means a
+  // request that sat in the queue longer than the timeout gets closed the
+  // instant someone picks it up -- which is the normal case, since agents
+  // aren't waiting by the screen. The visitor gets a full window to respond
+  // to the agent's first "hello" either way.
+  const idleSince = Math.max(lastUserMessage.ts, session.agentAssignedAt || 0);
+  if (Date.now() - idleSince < AGENT_IDLE_TIMEOUT_MS) return session;
 
   session.locked = true;
   session.agent = null;
+  session.agentUserId = null;
   await appendMessage(session, { role: "assistant", content: CONVERSATION_ENDED_MESSAGE });
   return session;
 }
@@ -214,6 +223,9 @@ function messagesSince(session, sinceSeq) {
 async function requestAgent(session) {
   if (session.agentRequested || session.agent) return session;
   session.agentRequested = true;
+  // Stamped so the dashboard queue can show how long someone has been
+  // waiting, which is the number that actually matters to an agent.
+  session.agentRequestedAt = Date.now();
   await appendMessage(session, {
     role: "assistant",
     content:
@@ -226,9 +238,18 @@ async function requestAgent(session) {
 
 // Hand the conversation to a human. Subsequent visitor messages skip the AI
 // entirely and wait for this agent to reply.
+//
+// `agent` is the visitor-visible identity (name + photo) and is sent
+// straight to the widget, so the CRM's internal user id is kept beside it
+// as `agentUserId` rather than inside it -- that field never leaves the
+// agent-facing API, and it's what lets the dashboard tell "you have this
+// chat" apart from "a teammate has it".
 async function assignAgent(session, agent) {
   session.agent = { name: agent.name, avatarUrl: agent.avatarUrl || "" };
+  session.agentUserId = agent.userId || null;
   session.agentRequested = true;
+  // Restarts the idle clock -- see maybeAutoCloseIdleSession.
+  session.agentAssignedAt = Date.now();
   await saveSession(session);
   return session;
 }
@@ -238,12 +259,46 @@ async function assignAgent(session, agent) {
 // same as an agent being attached.
 async function releaseAgent(session) {
   session.agent = null;
+  session.agentUserId = null;
   session.agentRequested = false;
   await saveSession(session);
   return session;
 }
 
-// ---- listing (for the future agent dashboard) ----
+// ---- listing (agent dashboard) ----
+
+// Agent-facing summary. Carries fields the visitor-facing `summarize()`
+// deliberately omits (agentUserId, the waiting flag), so keep the two
+// separate -- listVisitorConversations below feeds the widget.
+function summarizeForAgent(session) {
+  const last = session.messages[session.messages.length - 1];
+  // The visitor's own words, kept separate from `lastMessage`. A queue of
+  // requests otherwise shows nothing but the canned "connecting you with a
+  // member of our team" line on every row, since that's the most recent
+  // message in every waiting conversation -- useless for deciding who to
+  // pick up first.
+  const lastFromVisitor = session.messages.filter((m) => m.role === "user").pop();
+  return {
+    id: session.id,
+    clientId: session.clientId,
+    visitorId: session.visitorId || null,
+    agent: session.agent,
+    agentUserId: session.agentUserId || null,
+    agentRequested: !!session.agentRequested,
+    agentRequestedAt: session.agentRequestedAt || null,
+    locked: !!session.locked,
+    // "Someone asked for a human and nobody has picked it up" -- the queue
+    // the dashboard notifies on.
+    waiting: !!session.agentRequested && !session.agent && !session.locked,
+    seq: session.seq,
+    messageCount: session.messages.length,
+    updatedAt: session.updatedAt,
+    lastMessage: last
+      ? { role: last.role, content: last.content.slice(0, 120), sender: last.sender || null }
+      : null,
+    lastVisitorMessage: lastFromVisitor ? lastFromVisitor.content.slice(0, 120) : null,
+  };
+}
 
 async function listSessions(clientId) {
   let ids;
@@ -260,17 +315,7 @@ async function listSessions(clientId) {
   ids = ids.slice(0, MAX_LISTED_SESSIONS);
 
   const sessions = await Promise.all(ids.map((id) => getSession(id)));
-  return sessions.filter(Boolean).map((s) => {
-    const last = s.messages[s.messages.length - 1];
-    return {
-      id: s.id,
-      clientId: s.clientId,
-      agent: s.agent,
-      messageCount: s.messages.length,
-      updatedAt: s.updatedAt,
-      lastMessage: last ? { role: last.role, content: last.content.slice(0, 120) } : null,
-    };
-  });
+  return sessions.filter(Boolean).map(summarizeForAgent);
 }
 
 function summarize(session) {
@@ -329,4 +374,5 @@ module.exports = {
   requestAgent,
   listSessions,
   listVisitorConversations,
+  summarizeForAgent,
 };

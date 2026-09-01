@@ -31,7 +31,10 @@ any website; each business gets its own knowledge base (product info + FAQs).
     to restore the transcript after a page reload. The unguessable
     `sessionId` is the credential here; `clientId` is checked as defence in
     depth.
-  - Live-agent endpoints (see below), all under `/api/admin/sessions`.
+  - `POST /api/auth/login` / `logout` / `me` — agent CRM logins.
+  - `/api/workspace/*` — everything behind a workspace login (inbox,
+    claim, reply, team, settings). Scoped to the caller's own client.
+  - Live-agent escape hatches under `/api/admin/sessions` (see below).
 
 - `widget/widget.js` — the embeddable script. Vanilla JS, no dependencies, no
   build step. Reads `data-client-id` off its own `<script>` tag and infers the
@@ -56,6 +59,8 @@ any website; each business gets its own knowledge base (product info + FAQs).
   - **FAQs** now do triple duty: they go into the AI's prompt, the widget
     shows the top 3 as an inline preview on Home, and the full list as a
     browsable Help tab (see below).
+- `public/app.html` — the Agent Desk: the customer-facing CRM where a
+  business signs in to answer live chats and manage its own bot. See below.
 - `public/demo.html` — a stand-in customer website with the widget embedded,
   for end-to-end testing.
 - `server/data/clients/*.json` — one JSON file per business (their knowledge
@@ -219,8 +224,8 @@ visitor buckets.
 
 ### Live agent handoff
 
-The backend for human takeover is built; the agent-facing UI is not. Two
-ways a conversation ends up in front of a human:
+Two ways a conversation ends up in front of a human. The agent-facing side
+is the Agent Desk (see below).
 
 **Visitor-requested.** A "🙋 Talk to a live agent" button is shown in the
 chat while the AI is still handling things. Tapping it calls
@@ -239,15 +244,11 @@ this is visitor-facing), which:
   agent…", and hides the request button (`updateChatStatusUI` in
   `widget.js`) so it can't be tapped twice.
 
-**Operator-initiated**, via the same admin endpoints as before:
-
-| Endpoint | What it does |
-| --- | --- |
-| `GET /api/admin/sessions?clientId=…` | Active conversations, most recent first |
-| `GET /api/admin/sessions/:id` | Full transcript for one conversation |
-| `POST /api/admin/sessions/:id/takeover` | `{name, avatarUrl?, greeting?}` — the AI stops answering this session |
-| `POST /api/admin/sessions/:id/reply` | `{message}` — agent replies by hand |
-| `POST /api/admin/sessions/:id/release` | Hands control back to the bot (also clears `agentRequested`, or the AI would stay silent forever) |
+**Operator-initiated.** An agent picks a conversation up from the Agent
+Desk, which calls the workspace API (`/api/workspace/sessions/:id/claim`).
+The same actions also exist under `/api/admin/sessions/:id/*`
+(`takeover` / `reply` / `release`) as a platform-owner escape hatch for
+support — those reach any client, so they're for us, not for customers.
 
 Once an agent actually joins (`assignAgent`), `POST /api/chat` stops calling
 Gemini for that session and returns `{pending: true, agent}`; the visitor's
@@ -278,11 +279,13 @@ exactly 10 minutes to the second. The timeout only applies once an agent
 has actually joined; a visitor who requested one and is still waiting can
 wait indefinitely.
 
-Three things to know before putting agents in front of customers:
-- These admin endpoints share `ADMIN_KEY`. A real agent UI should get its
-  own per-agent auth — support staff shouldn't be able to edit knowledge
-  bases or read other clients' data. The visitor-facing `request-agent`
-  endpoint needs no key, by design — any visitor can ask.
+The clock runs from whichever is later, the visitor's last message or the
+moment the agent joined (`agentAssignedAt`). Using the message alone meant
+that picking up any request which had queued longer than the timeout closed
+it instantly — the normal case, since agents aren't sitting on the screen
+waiting.
+
+Two things to know before putting agents in front of customers:
 - Delivery is 4-second polling while the widget is open, not websockets.
   Fine at small scale and it works on Vercel (which doesn't hold persistent
   connections); revisit if you need instant delivery or have many concurrent
@@ -290,6 +293,62 @@ Three things to know before putting agents in front of customers:
 - The idle timeout is per-conversation wall-clock time based on the
   visitor's last message, not tied to the widget being open — closing the
   browser doesn't pause the clock.
+
+### The Agent Desk (`/app.html`)
+
+A business's own login, so customers never touch `ADMIN_KEY`. This is the
+distinction that makes the product multi-tenant rather than "one shared
+password": **`/api/admin` is the platform owner (us) and can reach every
+client; `/api/workspace` is a customer and can only ever reach their own.**
+No workspace route reads a `clientId` from the request — it always comes off
+the authenticated user, so editing a URL can't cross the boundary.
+
+**Two roles.** `owner` is the business: answers chats *and* edits the
+knowledge base, branding and team. `agent` is their staff: chats only. The
+dashboard hides Team/Settings from agents, but the server enforces it
+(`requireOwner`) — the hiding is convenience, not the boundary.
+
+**Accounts** live in `server/lib/users.js` (one `clientId` per user, so the
+user record *is* the tenancy key). Passwords are scrypt-hashed with a random
+salt per user; no new dependency, it's in Node's stdlib. Sessions are
+stateless signed tokens in an HttpOnly, SameSite=Lax cookie
+(`server/lib/auth.js`) — stateless because on serverless there's no
+long-lived process to hold a session table, and SameSite is what protects
+the whole workspace API from CSRF. The trade-off: a token can't be revoked
+before it expires (7 days), so changing a password doesn't sign out other
+devices.
+
+**Onboarding a business** is two platform-owner calls — create the client,
+then mint its first owner login:
+
+```bash
+curl -X POST http://localhost:3000/api/admin/clients   -H "x-admin-key: $ADMIN_KEY" -H "Content-Type: application/json"   -d '{"id":"joes-pizza","botName":"Joe","businessInfo":"..."}'
+
+curl -X POST http://localhost:3000/api/admin/clients/joes-pizza/users   -H "x-admin-key: $ADMIN_KEY" -H "Content-Type: application/json"   -d '{"email":"joe@joespizza.com","password":"at-least-8-chars","name":"Joe","role":"owner"}'
+```
+
+From there the owner signs in at `/app.html` and invites their own staff.
+
+**The inbox.** Polls `GET /api/workspace/inbox` every 4 seconds (again: no
+sockets on serverless) and splits conversations into Waiting / Mine / All.
+A conversation is *waiting* when the visitor asked for a human and nobody
+has picked it up (`agentRequested && !agent && !locked`).
+
+**Notifications.** Every signed-in agent sees the same queue, so a new
+request alerts all of them at once: a red badge, a count in the tab title, a
+synthesised chime (no audio file to ship) and a desktop notification if the
+browser has granted permission. The dashboard tracks which request ids it
+has already seen, so the alert fires once per visitor rather than every
+poll, and the backlog already present at login never triggers one.
+
+**Claiming.** Any agent can take any waiting chat. The claim attaches *that
+user's* name and photo to the conversation, which is what the visitor's
+widget then shows in place of the bot — so an agent's profile is
+customer-facing. A second agent claiming the same chat gets a 409 naming who
+holds it, and replies from anyone but the holder are rejected, so two agents
+can't interleave messages under one name. It's a read-then-write, so a
+genuinely simultaneous claim could still double-assign; closing that needs a
+compare-and-set in Redis.
 
 ## Setup
 

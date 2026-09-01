@@ -10,6 +10,14 @@ const {
   releaseAgent,
   listSessions,
 } = require("../lib/sessions");
+const {
+  listUsers,
+  createUser,
+  deleteUser,
+  getUser,
+  publicUser,
+} = require("../lib/users");
+const { requirePlatformAdmin } = require("../lib/auth");
 
 const router = express.Router();
 
@@ -24,21 +32,13 @@ const uploadPdf = multer({
   },
 });
 
-function requireAdminKey(req, res, next) {
-  const provided = req.header("x-admin-key");
-  const expected = process.env.ADMIN_KEY;
-  if (!expected || expected === "change-me-to-a-long-random-secret") {
-    return res.status(500).json({
-      error: "Server misconfigured: set a real ADMIN_KEY in .env before using the admin API.",
-    });
-  }
-  if (provided !== expected) {
-    return res.status(401).json({ error: "Invalid or missing x-admin-key header" });
-  }
-  next();
-}
-
-router.use(requireAdminKey);
+// The platform-owner API: creating and deleting whole workspaces, and
+// minting their first login. Authenticated by the single shared ADMIN_KEY,
+// which is exactly why it must never be handed to a customer -- one key
+// reaches every business. Customers get workspace logins instead and use
+// /api/workspace (see routes/workspace.js), which scopes everything to
+// their own clientId.
+router.use(requirePlatformAdmin);
 
 router.get("/clients", async (req, res) => {
   res.json({ clients: await listClients() });
@@ -97,15 +97,59 @@ router.post("/extract-pdf", (req, res) => {
 router.delete("/clients/:id", async (req, res) => {
   const deleted = await deleteClient(req.params.id);
   if (!deleted) return res.status(404).json({ error: "Unknown client id" });
+  // Take their logins with them. A user record left pointing at a deleted
+  // workspace can still authenticate, landing in a dashboard whose
+  // workspace no longer exists.
+  const orphans = await listUsers(req.params.id);
+  await Promise.all(orphans.map((u) => deleteUser(u.id)));
+  res.json({ deleted: true, usersRemoved: orphans.length });
+});
+
+// ---- workspace logins ----
+//
+// Onboarding a business means two steps: create the client config (above),
+// then create its first "owner" account here. From that point the business
+// signs in at /app.html and manages itself -- team, knowledge base and live
+// chat -- without ever touching ADMIN_KEY.
+
+router.get("/clients/:id/users", async (req, res) => {
+  const client = await getClient(req.params.id);
+  if (!client) return res.status(404).json({ error: "Unknown client id" });
+  const users = await listUsers(req.params.id);
+  res.json({ users: users.map(publicUser) });
+});
+
+router.post("/clients/:id/users", async (req, res) => {
+  const client = await getClient(req.params.id);
+  if (!client) return res.status(404).json({ error: "Unknown client id" });
+  const { email, password, name, role } = req.body || {};
+  try {
+    const user = await createUser({
+      clientId: req.params.id,
+      email,
+      password,
+      name,
+      role: role === "agent" ? "agent" : "owner",
+    });
+    res.json(publicUser(user));
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.delete("/users/:userId", async (req, res) => {
+  const user = await getUser(req.params.userId);
+  if (!user) return res.status(404).json({ error: "Unknown user" });
+  await deleteUser(user.id);
   res.json({ deleted: true });
 });
 
 // ---- live agent handoff ----
 //
-// The backend half of human takeover. There's no agent dashboard yet, so
-// these sit behind the same ADMIN_KEY as everything else; when a real agent
-// UI is built it should get its own per-agent auth rather than sharing the
-// admin key, since agents shouldn't be able to edit knowledge bases.
+// Kept as a platform-owner escape hatch for support and debugging. The
+// real agent-facing versions of these live in routes/workspace.js behind a
+// workspace login; these ones can reach any client, so they're for us, not
+// for customers.
 
 // Active conversations for a client, most recently active first.
 router.get("/sessions", async (req, res) => {
