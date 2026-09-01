@@ -25,7 +25,7 @@ const MAX_LISTED_SESSIONS = 100;
 // sliding -- every write pushes it out again -- so this is "idle for N days",
 // not "N days since it started". A returning visitor picks up where they
 // left off instead of finding an empty widget.
-const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS) || 30;
+const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS) || 1;
 const SESSION_TTL_SECONDS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60;
 
 const SESSION_KEY = "chatbot:session:";

@@ -52,6 +52,7 @@
     brandColor: "#6366f1",
     avatarUrl: "",
     quickReplies: [],
+    faqs: [],
   };
 
   // Who the visitor is currently talking to. Defaults to the AI bot; if the
@@ -140,6 +141,46 @@
       "#cw-status i{width:7px;height:7px;border-radius:50%;background:#4ade80;display:inline-block;box-shadow:0 0 0 2px " + rgba("#4ade80", 0.3) + "}" +
       "#cw-close{background:rgba(255,255,255,.16);border:none;color:" + onBrand + ";width:30px;height:30px;border-radius:50%;font-size:17px;cursor:pointer;line-height:1;display:flex;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s ease}" +
       "#cw-close:hover{background:rgba(255,255,255,.3)}" +
+      "#cw-back{background:rgba(255,255,255,.16);border:none;width:30px;height:30px;border-radius:50%;cursor:pointer;padding:0;display:none;align-items:center;justify-content:center;flex-shrink:0;transition:background .15s ease}" +
+      "#cw-back:hover{background:rgba(255,255,255,.3)}" +
+      "#cw-back svg{width:17px;height:17px}" +
+      "#cw-root.cw-has-back #cw-back{display:flex}" +
+      /* on the menu the avatar lives in the body instead, so the header stays light */
+      "#cw-window.cw-on-menu #cw-header .cw-avatar{display:none}" +
+
+      /* view switching */
+      ".cw-view{display:none;flex:1;flex-direction:column;min-height:0}" +
+      ".cw-view.cw-active{display:flex}" +
+
+      /* menu */
+      "#cw-menu-list{flex:1;overflow-y:auto;padding:18px 16px;display:flex;flex-direction:column;gap:10px;background:#f7f8fa}" +
+      ".cw-menu-head{display:flex;align-items:center;gap:12px;padding:4px 2px 12px}" +
+      ".cw-menu-head strong{display:block;font-size:15.5px;color:#1a1c22}" +
+      ".cw-menu-head span{display:block;font-size:12.5px;color:#8a8d99;margin-top:1px}" +
+      ".cw-tile{display:flex;align-items:center;gap:13px;width:100%;text-align:left;background:#fff;border:1px solid #e8e9ee;border-radius:14px;padding:14px;cursor:pointer;font-family:inherit;transition:border-color .15s ease,box-shadow .15s ease,transform .12s ease}" +
+      ".cw-tile:hover{border-color:" + rgba(brand, 0.5) + ";box-shadow:0 3px 10px rgba(0,0,0,.06);transform:translateY(-1px)}" +
+      ".cw-tile-ico{width:38px;height:38px;border-radius:11px;background:" + rgba(brand, 0.1) + ";color:" + shade(brand, -0.2) + ";display:flex;align-items:center;justify-content:center;flex-shrink:0}" +
+      ".cw-tile-ico svg{width:19px;height:19px}" +
+      ".cw-tile-text{flex:1;min-width:0}" +
+      ".cw-tile-text strong{display:block;font-size:14.5px;color:#1a1c22;font-weight:600}" +
+      ".cw-tile-text span{display:block;font-size:12.5px;color:#8a8d99;margin-top:2px}" +
+      ".cw-tile-chev{color:#c2c5cf;display:flex;flex-shrink:0}" +
+      ".cw-tile-chev svg{width:17px;height:17px}" +
+
+      /* faq */
+      "#cw-faq-list{flex:1;overflow-y:auto;padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;background:#f7f8fa}" +
+      "#cw-faq-list::-webkit-scrollbar,#cw-menu-list::-webkit-scrollbar{width:6px}" +
+      "#cw-faq-list::-webkit-scrollbar-thumb,#cw-menu-list::-webkit-scrollbar-thumb{background:#d4d6dd;border-radius:3px}" +
+      ".cw-faq-item{background:#fff;border:1px solid #e8e9ee;border-radius:12px;overflow:hidden}" +
+      ".cw-faq-q{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;padding:13px 14px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:550;color:#1a1c22;line-height:1.4}" +
+      ".cw-faq-q span{flex:1}" +
+      ".cw-faq-caret{color:#b0b3bd;display:flex;flex-shrink:0;transition:transform .2s ease}" +
+      ".cw-faq-caret svg{width:16px;height:16px}" +
+      ".cw-faq-item.cw-open .cw-faq-caret{transform:rotate(180deg)}" +
+      ".cw-faq-a{display:none;padding:0 14px 14px;font-size:13.8px;line-height:1.55;color:#4a4d59;white-space:pre-wrap}" +
+      ".cw-faq-item.cw-open .cw-faq-a{display:block;animation:cw-in .22s ease}" +
+      ".cw-faq-cta{margin-top:6px;background:none;border:none;color:" + shade(brand, -0.2) + ";font-family:inherit;font-size:13.5px;font-weight:600;cursor:pointer;padding:10px;border-radius:10px;transition:background .15s ease}" +
+      ".cw-faq-cta:hover{background:" + rgba(brand, 0.08) + "}" +
 
       /* avatars */
       ".cw-avatar{width:38px;height:38px;border-radius:50%;flex-shrink:0;object-fit:cover;display:flex;align-items:center;justify-content:center;font-weight:650;font-size:14px;overflow:hidden;background:" + shade(brand, 0.75) + ";color:" + shade(brand, -0.35) + "}" +
@@ -236,6 +277,11 @@
 
     var win = el("div", { id: "cw-window", role: "dialog", "aria-label": "Chat" });
 
+    var backBtn = el("button", { id: "cw-back", "aria-label": "Back to menu" });
+    backBtn.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="' + contrastText(config.brandColor) +
+      '" stroke-width="2.3" stroke-linecap="round" stroke-linejoin="round"><path d="M15 18l-6-6 6-6"></path></svg>';
+
     var headerAvatar = makeAvatar(false);
     var title = el("span", { id: "cw-title", text: config.botName });
     var statusDot = el("i", {});
@@ -243,34 +289,49 @@
     var status = el("div", { id: "cw-status" }, [statusDot, statusText]);
     var headerInfo = el("div", { id: "cw-header-info" }, [title, status]);
     var closeBtn = el("button", { id: "cw-close", "aria-label": "Close chat", text: "✕" });
-    var header = el("div", { id: "cw-header" }, [headerAvatar, headerInfo, closeBtn]);
+    var header = el("div", { id: "cw-header" }, [backBtn, headerAvatar, headerInfo, closeBtn]);
 
+    // --- chat view ---
     var messages = el("div", { id: "cw-messages" });
-
     var input = el("textarea", { id: "cw-input", rows: "1", placeholder: "Type a message…" });
     var send = el("button", { id: "cw-send", "aria-label": "Send" });
     send.innerHTML =
       '<svg viewBox="0 0 24 24" fill="' + contrastText(config.brandColor) + '"><path d="M2 21l21-9L2 3v7l15 2-15 2z"></path></svg>';
     var inputBar = el("div", { id: "cw-inputbar" }, [input, send]);
-
     var footer = el("div", { id: "cw-footer", text: "Powered by chatbot-ai" });
+    var chatView = el("div", { class: "cw-view", "data-view": "chat" }, [messages, inputBar, footer]);
+
+    // --- menu view (what the chat's back arrow leads to) ---
+    var menuList = el("div", { id: "cw-menu-list" });
+    var menuView = el("div", { class: "cw-view", "data-view": "menu" }, [menuList]);
+
+    // --- faq view ---
+    var faqList = el("div", { id: "cw-faq-list" });
+    var faqView = el("div", { class: "cw-view", "data-view": "faq" }, [faqList]);
 
     win.appendChild(header);
-    win.appendChild(messages);
-    win.appendChild(inputBar);
-    win.appendChild(footer);
+    win.appendChild(chatView);
+    win.appendChild(menuView);
+    win.appendChild(faqView);
     root.appendChild(win);
     root.appendChild(bubble);
     document.body.appendChild(root);
 
     els = {
-      root: root, bubble: bubble, window: win, headerAvatar: headerAvatar,
-      title: title, statusText: statusText, close: closeBtn,
-      messages: messages, input: input, send: send,
+      root: root, bubble: bubble, window: win, header: header, back: backBtn,
+      headerAvatar: headerAvatar, title: title, status: status, statusText: statusText,
+      close: closeBtn, messages: messages, input: input, send: send,
+      views: { chat: chatView, menu: menuView, faq: faqView },
+      menuList: menuList, faqList: faqList,
     };
+
+    buildMenu();
+    buildFaq();
+    showView("chat");
 
     bubble.addEventListener("click", toggleOpen);
     closeBtn.addEventListener("click", toggleOpen);
+    backBtn.addEventListener("click", function () { showView("menu"); });
     send.addEventListener("click", sendMessage);
     input.addEventListener("keydown", function (e) {
       if (e.key === "Enter" && !e.shiftKey) {
@@ -282,6 +343,107 @@
       input.style.height = "auto";
       input.style.height = Math.min(input.scrollHeight, 96) + "px";
     });
+  }
+
+  // --- view navigation: chat <-> menu <-> faq ---------------------------
+  //
+  // The widget opens straight into the chat (that's the point of it). The
+  // back arrow goes "up" to a menu, from which the visitor can browse FAQs
+  // or drop back into the conversation -- which is still there, since views
+  // are hidden rather than torn down.
+
+  var currentView = "chat";
+
+  var VIEW_TITLES = {
+    menu: { title: "How can we help?", status: "" },
+    faq: { title: "FAQs", status: "" },
+  };
+
+  function showView(name) {
+    currentView = name;
+    Object.keys(els.views).forEach(function (k) {
+      els.views[k].classList.toggle("cw-active", k === name);
+    });
+    // The back arrow only makes sense when there's somewhere to go back to.
+    els.root.classList.toggle("cw-has-back", name !== "menu");
+    els.window.classList.toggle("cw-on-menu", name === "menu");
+
+    if (name === "chat") {
+      refreshHeaderIdentity();
+      scrollToBottom();
+      setTimeout(function () { els.input.focus(); }, 120);
+    } else {
+      var meta = VIEW_TITLES[name];
+      els.title.textContent = meta.title;
+      els.statusText.textContent = meta.status;
+      els.status.style.display = meta.status ? "" : "none";
+    }
+    if (name === "chat") els.status.style.display = "";
+  }
+
+  function menuTile(icon, label, sub, onClick) {
+    var iconEl = el("div", { class: "cw-tile-ico" });
+    iconEl.innerHTML = icon;
+    var textEl = el("div", { class: "cw-tile-text" }, [
+      el("strong", { text: label }),
+      el("span", { text: sub }),
+    ]);
+    var chevron = el("div", { class: "cw-tile-chev" });
+    chevron.innerHTML =
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18l6-6-6-6"></path></svg>';
+    var tile = el("button", { class: "cw-tile", type: "button" }, [iconEl, textEl, chevron]);
+    tile.addEventListener("click", onClick);
+    return tile;
+  }
+
+  function buildMenu() {
+    els.menuList.innerHTML = "";
+    els.menuList.appendChild(el("div", { class: "cw-menu-head" }, [
+      makeAvatar(false),
+      el("div", {}, [
+        el("strong", { text: config.botName }),
+        el("span", { text: "Typically replies in a few seconds" }),
+      ]),
+    ]));
+
+    els.menuList.appendChild(menuTile(
+      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 11.5a8.38 8.38 0 0 1-.9 3.8 8.5 8.5 0 0 1-7.6 4.7 8.38 8.38 0 0 1-3.8-.9L3 21l1.9-5.7a8.38 8.38 0 0 1-.9-3.8 8.5 8.5 0 0 1 4.7-7.6 8.38 8.38 0 0 1 3.8-.9h.5a8.48 8.48 0 0 1 8 8v.5z"></path></svg>',
+      "Chat with us",
+      "Ask anything and get an instant answer",
+      function () { showView("chat"); }
+    ));
+
+    if (config.faqs && config.faqs.length) {
+      els.menuList.appendChild(menuTile(
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>',
+        "FAQs",
+        config.faqs.length + " common question" + (config.faqs.length === 1 ? "" : "s"),
+        function () { showView("faq"); }
+      ));
+    }
+  }
+
+  function buildFaq() {
+    els.faqList.innerHTML = "";
+    (config.faqs || []).forEach(function (faq) {
+      var q = el("button", { class: "cw-faq-q", type: "button" }, [
+        el("span", { text: faq.question }),
+      ]);
+      var caret = el("i", { class: "cw-faq-caret" });
+      caret.innerHTML =
+        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"></path></svg>';
+      q.appendChild(caret);
+      var a = el("div", { class: "cw-faq-a", text: faq.answer });
+      var item = el("div", { class: "cw-faq-item" }, [q, a]);
+      q.addEventListener("click", function () { item.classList.toggle("cw-open"); });
+      els.faqList.appendChild(item);
+    });
+
+    // Always leave a route back to the bot -- the FAQ is a shortcut, not a
+    // dead end, and anything not covered here is exactly what the AI is for.
+    var cta = el("button", { class: "cw-faq-cta", type: "button", text: "Still need help? Ask our assistant →" });
+    cta.addEventListener("click", function () { showView("chat"); });
+    els.faqList.appendChild(cta);
   }
 
   function toggleOpen() {
@@ -516,6 +678,7 @@
         config.brandColor = data.brandColor || config.brandColor;
         config.avatarUrl = data.avatarUrl || "";
         config.quickReplies = Array.isArray(data.quickReplies) ? data.quickReplies : [];
+        config.faqs = Array.isArray(data.faqs) ? data.faqs : [];
       })
       .catch(function () {
         // fall back to defaults; still render the widget so the site owner

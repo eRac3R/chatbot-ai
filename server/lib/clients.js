@@ -124,8 +124,19 @@ async function getClient(clientId) {
 async function getPublicClient(clientId) {
   const client = await getClient(clientId);
   if (!client) return null;
-  const { id, botName, welcomeMessage, brandColor, avatarUrl, quickReplies } = client;
-  return { id, botName, welcomeMessage, brandColor, avatarUrl, quickReplies };
+  const { id, botName, welcomeMessage, brandColor, avatarUrl, quickReplies, faqs } = client;
+  // faqs are safe to expose -- they're written to be shown to visitors, and
+  // the widget renders them as a browsable tab. businessInfo deliberately
+  // stays server-side: it's a bulk dump that may contain internal notes.
+  return {
+    id,
+    botName,
+    welcomeMessage,
+    brandColor,
+    avatarUrl,
+    quickReplies,
+    faqs: Array.isArray(faqs) ? faqs : [],
+  };
 }
 
 async function listClients() {

@@ -43,6 +43,23 @@ any website; each business gets its own knowledge base (product info + FAQs).
   - **Quick reply buttons** (`quickReplies`) — up to 4 suggested questions
     rendered as tappable chips under the welcome message, so visitors can
     start without typing. They disappear once the visitor sends anything.
+  - **FAQs** now do double duty: they still go into the AI's prompt, and the
+    widget also renders them as a browsable tab (see below).
+
+### Widget navigation
+
+The widget opens straight into the chat. A back arrow in the header goes up
+to a menu, from which the visitor can pick:
+
+- **Chat with us** — back into the AI conversation, exactly where they left
+  it. Views are hidden rather than rebuilt, so the transcript, scroll
+  position and any in-flight reply all survive navigating away and back.
+- **FAQs** — the client's configured FAQs as a tap-to-expand list, with a
+  "Still need help? Ask our assistant →" link so it's a shortcut rather than
+  a dead end. The tile is hidden entirely when a client has no FAQs.
+
+Adding another tab means one `menuTile(...)` call plus a view container in
+`widget.js` — the view switcher is generic.
 - `public/demo.html` — a stand-in customer website with the widget embedded,
   for end-to-end testing.
 - `server/data/clients/*.json` — one JSON file per business (their knowledge
@@ -72,7 +89,7 @@ automatically:
 
 By default a visitor's conversation is stored server-side against a random id
 kept in their browser's `localStorage`, so it survives reloads and closing
-the widget, and is restored when they come back. Retention is **30 days of
+the widget, and is restored when they come back. Retention is **1 day of
 inactivity** by default (`SESSION_TTL_DAYS`), sliding — every new message
 pushes the expiry out again.
 
