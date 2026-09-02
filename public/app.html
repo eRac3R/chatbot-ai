@@ -231,8 +231,8 @@
   .ws-row-main{display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer}
   .ws-swatch{width:30px;height:30px;border-radius:8px;flex-shrink:0;border:1px solid var(--line)}
   .ws-meta{flex:1;min-width:0}
-  .ws-name{font-weight:650;font-size:13.5px}
-  .ws-id{font-size:11.5px;color:var(--faint);font-family:monospace;margin-top:1px}
+  .ws-id{font-weight:650;font-size:13.5px}
+  .ws-name{font-size:11.5px;color:var(--faint);margin-top:1px}
   .ws-website{display:inline-block;font-size:11.5px;color:#8f7bff;text-decoration:none;margin-top:3px}
   .ws-website:hover{text-decoration:underline}
   .ws-stats{display:flex;gap:7px;flex-shrink:0}
@@ -815,8 +815,8 @@
     main.className = "ws-row-main";
     main.innerHTML =
       '<div class="ws-swatch" style="background:' + esc(w.brandColor || "#6366f1") + '"></div>' +
-      '<div class="ws-meta"><div class="ws-name">' + esc(w.botName || w.id) + '</div>' +
-      '<div class="ws-id">' + esc(w.id) + '</div>' + websiteLink + '</div>' +
+      '<div class="ws-meta"><div class="ws-id">' + esc(w.id) + '</div>' +
+      '<div class="ws-name">' + esc(w.botName || w.id) + '</div>' + websiteLink + '</div>' +
       '<div class="ws-stats">' +
         '<span class="ws-pill">' + w.faqCount + ' FAQ' + (w.faqCount === 1 ? "" : "s") + '</span>' +
         '<span class="ws-pill ws-pill-users">' + w.userCount + ' team member' + (w.userCount === 1 ? "" : "s") + '</span>' +
