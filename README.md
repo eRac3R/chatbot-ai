@@ -318,6 +318,14 @@ knowledge base, branding and team. `agent` is their staff: chats only. The
 dashboard hides Team/Settings from agents, but the server enforces it
 (`requireOwner`) — the hiding is convenience, not the boundary.
 
+**The embed snippet lives in Settings, not just `admin.html`.** The top
+card there ("Embed on your website") shows the exact `<script>` tag for
+this workspace, built client-side from `window.location.origin` and the
+workspace's own id (returned by `GET /api/workspace/client`, which an
+owner can only ever fetch for their own client — no new endpoint needed).
+Without this an owner had no way to get their snippet back except asking
+us for it again.
+
 **Accounts** live in `server/lib/users.js` (one `clientId` per user, so the
 user record *is* the tenancy key). Passwords are scrypt-hashed with a random
 salt per user; no new dependency, it's in Node's stdlib. Sessions are

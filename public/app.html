@@ -340,6 +340,12 @@
       <div class="scroll">
         <div id="settingsMsg"></div>
         <div class="card">
+          <h3>Embed on your website</h3>
+          <p class="hint">Paste this once, just before <code>&lt;/body&gt;</code>, on any page you want the chat widget to appear. Works everywhere without changes — the same snippet, forever, even after you edit anything below.</p>
+          <div id="embedSnippetBox" style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-family:monospace;font-size:12.5px;word-break:break-all;color:var(--text)"></div>
+          <button class="btn btn-ghost btn-sm" id="copySnippetBtn" style="margin-top:10px">Copy snippet</button>
+        </div>
+        <div class="card">
           <h3>Bot identity</h3>
           <p class="hint">How the assistant introduces itself in the chat widget on your site.</p>
           <div class="row">
@@ -868,6 +874,11 @@
       $("cTone").value = c.tone || "";
       $("cBusinessInfo").value = c.businessInfo || "";
       renderFaqs(c.faqs || []);
+      // c.id is this workspace's own clientId -- a signed-in owner can only
+      // ever load their own client (see requireOwner + workspace.js), so
+      // there's no risk of building someone else's snippet here.
+      $("embedSnippetBox").textContent =
+        '<script src="' + window.location.origin + '/widget.js" data-client-id="' + c.id + '"></' + "script>";
     }).catch(function (err) { toast(err.message); });
   }
 
@@ -882,6 +893,30 @@
     }).join("");
     bindFaqDeletes();
   }
+
+  $("copySnippetBtn").addEventListener("click", function () {
+    var text = $("embedSnippetBox").textContent;
+    var btn = this;
+    var revert = function (label) {
+      setTimeout(function () { btn.textContent = "Copy snippet"; }, 1800);
+      btn.textContent = label;
+    };
+    // navigator.clipboard needs a secure context (https, or localhost) --
+    // absent that (e.g. plain http in some self-hosted setup), fall back to
+    // select-and-copy via a hidden textarea rather than leaving the button
+    // silently do nothing.
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(function () { revert("Copied!"); })
+        .catch(function () { revert("Couldn't copy — select manually"); });
+    } else {
+      var ta = document.createElement("textarea");
+      ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+      document.body.appendChild(ta); ta.select();
+      try { document.execCommand("copy"); revert("Copied!"); }
+      catch (e) { revert("Couldn't copy — select manually"); }
+      document.body.removeChild(ta);
+    }
+  });
 
   function bindFaqDeletes() {
     var dels = $("faqList").querySelectorAll(".faq-del");
