@@ -202,6 +202,11 @@ router.post("/sessions/:sessionId/takeover", async (req, res) => {
   const session = await getSession(req.params.sessionId);
   if (!session) return res.status(404).json({ error: "Unknown session" });
   if (session.locked) return res.status(409).json({ error: "This conversation has ended." });
+  if (session.tempLocked) {
+    return res
+      .status(409)
+      .json({ error: "This conversation is temporarily paused, waiting for the visitor to reopen it." });
+  }
 
   const agent = { name: name.trim().slice(0, 60), avatarUrl: avatarUrl || "" };
   await assignAgent(session, agent);
@@ -240,6 +245,14 @@ router.post("/sessions/:sessionId/reply", async (req, res) => {
 router.post("/sessions/:sessionId/release", async (req, res) => {
   const session = await getSession(req.params.sessionId);
   if (!session) return res.status(404).json({ error: "Unknown session" });
+  // Nothing to release -- the pause already cleared the agent, and
+  // releaseAgent would also clear agentRequested, silently pulling the
+  // conversation out of the waiting queue before the visitor reopens it.
+  if (session.tempLocked) {
+    return res
+      .status(409)
+      .json({ error: "This conversation is temporarily paused, waiting for the visitor to reopen it." });
+  }
   await releaseAgent(session);
   res.json({ agent: null, seq: session.seq });
 });

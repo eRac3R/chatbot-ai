@@ -90,6 +90,15 @@ router.post("/sessions/:sessionId/claim", async (req, res) => {
   const session = await loadOwnSession(req, res);
   if (!session) return;
   if (session.locked) return res.status(409).json({ error: "This conversation has ended." });
+  // Paused (see maybeAutoPauseIdleSession in lib/sessions.js) means the
+  // visitor went quiet on a live agent 30+ minutes ago -- it only becomes
+  // claimable again once THEY reopen it by sending a new message, not the
+  // moment an agent tries to grab it.
+  if (session.tempLocked) {
+    return res
+      .status(409)
+      .json({ error: "This conversation is temporarily paused, waiting for the visitor to reopen it." });
+  }
 
   if (session.agent && session.agentUserId && session.agentUserId !== req.user.id) {
     const holder = await getUser(session.agentUserId);
@@ -127,6 +136,11 @@ router.post("/sessions/:sessionId/reply", async (req, res) => {
   const session = await loadOwnSession(req, res);
   if (!session) return;
   if (session.locked) return res.status(409).json({ error: "This conversation has ended." });
+  if (session.tempLocked) {
+    return res
+      .status(409)
+      .json({ error: "This conversation is temporarily paused, waiting for the visitor to reopen it." });
+  }
   if (!session.agent) {
     return res.status(409).json({ error: "Pick this conversation up before replying" });
   }
@@ -152,6 +166,15 @@ router.post("/sessions/:sessionId/reply", async (req, res) => {
 router.post("/sessions/:sessionId/release", async (req, res) => {
   const session = await loadOwnSession(req, res);
   if (!session) return;
+  // Nothing to release -- the pause already cleared the agent. Letting this
+  // through would clear agentRequested too (releaseAgent's job), silently
+  // pulling the conversation out of the waiting queue before the visitor
+  // ever chose to reopen it.
+  if (session.tempLocked) {
+    return res
+      .status(409)
+      .json({ error: "This conversation is temporarily paused, waiting for the visitor to reopen it." });
+  }
   await releaseAgent(session);
   res.json(summarizeForAgent(session));
 });

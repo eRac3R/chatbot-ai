@@ -12,6 +12,7 @@ const {
   messagesSince,
   listVisitorConversations,
   requestAgent,
+  reopenConversation,
 } = require("../lib/sessions");
 const { resolveSessionId } = require("../lib/identity");
 
@@ -161,6 +162,7 @@ router.get("/sessions/:sessionId/messages", async (req, res) => {
     agent: session.agent,
     agentRequested: session.agentRequested,
     locked: session.locked,
+    tempLocked: session.tempLocked,
     seq: session.seq,
   });
 });
@@ -197,20 +199,29 @@ router.post("/chat", async (req, res) => {
   }
 
   try {
+    // A tempLocked (paused) conversation is deliberately NOT rejected here
+    // -- sending a message is exactly how a visitor reopens one (see
+    // reopenConversation in lib/sessions.js). Captured before appending the
+    // message so we know whether this send is what triggered the reopen.
+    const wasPaused = session.tempLocked;
     const userMessage = await appendMessage(session, { role: "user", content: message });
+    if (wasPaused) await reopenConversation(session);
 
     // A human agent has taken over, or the visitor has asked for one and is
     // still waiting -- either way, record the visitor's message and don't
-    // call the AI. The widget picks up an agent's reply (or the "waiting"
-    // canned message posted by requestAgent) by polling
-    // /sessions/:id/messages rather than getting it inline here.
+    // call the AI. The widget picks up an agent's reply (or the "waiting"/
+    // "welcome back" canned messages posted by requestAgent/
+    // reopenConversation) by polling /sessions/:id/messages rather than
+    // getting it inline here. Reopening always lands here too, since
+    // agentRequested was never cleared by the pause.
     if (session.agent || session.agentRequested) {
       return res.json({
         pending: true,
         agent: session.agent,
         agentRequested: session.agentRequested,
+        tempLocked: session.tempLocked,
         sessionId: sessionId,
-        seq: userMessage.seq,
+        seq: session.seq,
       });
     }
 

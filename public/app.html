@@ -25,9 +25,20 @@
 
   /* ---------- login ---------- */
   #login{
-    min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
+    position:relative;min-height:100vh;display:flex;align-items:center;justify-content:center;padding:24px;
     background:radial-gradient(1200px 600px at 50% -10%,rgba(108,92,231,.22),transparent 60%);
   }
+  #adminCornerBtn{
+    position:fixed;top:20px;right:20px;background:var(--surface);border:1px solid var(--line);
+    color:var(--muted);padding:8px 15px;border-radius:9px;font-size:12.5px;font-weight:600;
+    transition:color .15s,border-color .15s;
+  }
+  #adminCornerBtn:hover{color:var(--text);border-color:var(--brand)}
+  .link-btn{
+    background:none;border:none;color:var(--muted);font-size:12.5px;font-weight:600;
+    padding:12px 0 0;width:100%;text-align:center;
+  }
+  .link-btn:hover{color:var(--text)}
   .login-card{
     width:100%;max-width:400px;background:var(--surface);border:1px solid var(--line);
     border-radius:20px;padding:34px 30px;box-shadow:0 24px 60px rgba(0,0,0,.45);
@@ -155,6 +166,7 @@
   .tag.taken{background:var(--surface-2);color:var(--muted)}
   .tag.bot{background:rgba(108,92,231,.18);color:#b3a5ff}
   .tag.ended{background:rgba(239,68,68,.15);color:#fca5a5}
+  .tag.paused{background:var(--surface-2);color:var(--faint)}
   .empty{padding:44px 22px;text-align:center;color:var(--faint);font-size:13px;line-height:1.6}
 
   /* ---------- conversation pane ---------- */
@@ -214,6 +226,30 @@
   @keyframes flash{0%,100%{background:rgba(245,158,11,.07)}50%{background:rgba(245,158,11,.22)}}
   .conv.justin{animation:flash 1.1s ease 2}
 
+  /* ---------- platform admin: workspaces list ---------- */
+  .ws-row{background:var(--surface);border:1px solid var(--line);border-radius:12px;margin-bottom:10px;overflow:hidden}
+  .ws-row-main{display:flex;align-items:center;gap:12px;padding:13px 15px;cursor:pointer}
+  .ws-swatch{width:30px;height:30px;border-radius:8px;flex-shrink:0;border:1px solid var(--line)}
+  .ws-meta{flex:1;min-width:0}
+  .ws-name{font-weight:650;font-size:13.5px}
+  .ws-id{font-size:11.5px;color:var(--faint);font-family:monospace;margin-top:1px}
+  .ws-stats{display:flex;gap:7px;flex-shrink:0}
+  .ws-pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:10px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
+  .ws-caret{transition:transform .15s ease;color:var(--faint);flex-shrink:0}
+  .ws-row.open .ws-caret{transform:rotate(90deg)}
+  .ws-detail{display:none;border-top:1px solid var(--line);padding:15px;background:var(--surface-2)}
+  .ws-row.open .ws-detail{display:block}
+  .ws-detail h4{margin:0 0 9px;font-size:12.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+  .ws-user-row{display:flex;align-items:center;gap:9px;padding:7px 0;font-size:13px;border-bottom:1px solid var(--line)}
+  .ws-user-row:last-of-type{border-bottom:none}
+  .ws-user-row .email{color:var(--muted)}
+  .ws-user-role{font-size:10.5px;font-weight:700;padding:2px 8px;border-radius:9px;background:var(--brand-soft);color:#c4b8ff;text-transform:uppercase}
+  .ws-user-row button{margin-left:auto}
+  .ws-add-user{display:flex;gap:7px;margin-top:11px;flex-wrap:wrap}
+  .ws-add-user input,.ws-add-user select{padding:8px 10px;font-size:12.5px}
+  .ws-add-user input[type=text],.ws-add-user input[type=email]{flex:1;min-width:110px}
+  .ws-row-actions{display:flex;gap:9px;margin-top:13px}
+
   @media (max-width:880px){
     #app{grid-template-columns:1fr}
     aside{display:none}
@@ -228,28 +264,48 @@
 
 <!-- ============ LOGIN ============ -->
 <div id="login">
+  <button id="adminCornerBtn" type="button">Admin</button>
   <div class="login-card">
     <div class="brand">
       <div class="brand-mark">⚡</div>
       <div>
-        <div class="brand-name">Branofy</div>
-        <div class="brand-sub">Agent Desk</div>
+        <div class="brand-name" id="loginBrandName">Branofy</div>
+        <div class="brand-sub" id="loginBrandSub">Agent Desk</div>
       </div>
     </div>
-    <h1>Sign in</h1>
-    <p class="lead">Answer live chats from your website visitors.</p>
-    <div id="loginErr" class="err hidden"></div>
-    <form id="loginForm">
-      <div class="field">
-        <label for="email">Email</label>
-        <input type="email" id="email" autocomplete="username" required />
-      </div>
-      <div class="field">
-        <label for="password">Password</label>
-        <input type="password" id="password" autocomplete="current-password" required />
-      </div>
-      <button class="btn btn-full" type="submit" id="loginBtn">Sign in</button>
-    </form>
+
+    <!-- workspace login: businesses/agents -->
+    <div id="workspaceLoginBlock">
+      <h1>Sign in</h1>
+      <p class="lead">Answer live chats from your website visitors.</p>
+      <div id="loginErr" class="err hidden"></div>
+      <form id="loginForm">
+        <div class="field">
+          <label for="email">Email</label>
+          <input type="email" id="email" autocomplete="username" required />
+        </div>
+        <div class="field">
+          <label for="password">Password</label>
+          <input type="password" id="password" autocomplete="current-password" required />
+        </div>
+        <button class="btn btn-full" type="submit" id="loginBtn">Sign in</button>
+      </form>
+    </div>
+
+    <!-- platform-admin login: us, not customers -->
+    <div id="adminLoginBlock" class="hidden">
+      <h1>Platform admin</h1>
+      <p class="lead">Create and manage every workspace on this server.</p>
+      <div id="adminLoginErr" class="err hidden"></div>
+      <form id="adminLoginForm">
+        <div class="field">
+          <label for="platformAdminKey">Admin key</label>
+          <input type="password" id="platformAdminKey" autocomplete="current-password" required />
+        </div>
+        <button class="btn btn-full" type="submit" id="adminLoginBtn">Sign in as admin</button>
+      </form>
+      <button type="button" id="backToWorkspaceLogin" class="link-btn">← Back to sign in</button>
+    </div>
   </div>
 </div>
 
@@ -387,6 +443,87 @@
   </main>
 </div>
 
+<!-- ============ PLATFORM ADMIN ============ -->
+<div id="adminPanel" class="hidden" style="display:flex;flex-direction:column;height:100vh">
+  <div class="topbar" style="flex-shrink:0">
+    <h2>Platform Admin</h2>
+    <div class="spacer"></div>
+    <button class="btn btn-ghost btn-sm" id="adminSignOutBtn">Sign out</button>
+  </div>
+  <div class="scroll" style="flex:1">
+    <div class="card">
+      <h3>Workspaces</h3>
+      <p class="hint">Every business on this server. Expand one to see its team, edit it, or delete it.</p>
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px">
+        <button class="btn btn-ghost btn-sm" id="adminWsRefresh">Refresh</button>
+        <button class="btn btn-sm" id="adminWsNewBtn">+ New workspace</button>
+        <span id="adminWsStatus" style="font-size:12.5px;color:var(--muted)"></span>
+      </div>
+      <div id="adminWsList"></div>
+    </div>
+
+    <div id="adminEditingNotice" class="card hidden" style="border-color:var(--brand);max-width:720px">
+      Editing <strong id="adminEditingName"></strong> — the Client ID below is locked so you don't
+      accidentally create a second workspace.
+      <button type="button" id="adminCancelEdit" class="link-btn" style="text-align:left;padding:8px 0 0">Cancel, start a new workspace instead</button>
+    </div>
+
+    <div class="card">
+      <h3 id="adminFormHeading">New workspace</h3>
+      <div id="adminFormMsg"></div>
+      <div class="field"><label>Client ID <span style="color:var(--faint);font-weight:400">(letters/numbers/-/_, becomes part of the widget URL)</span></label>
+        <input type="text" id="adminClientId" placeholder="acme-co" /></div>
+      <div class="row">
+        <div class="field"><label>Bot name</label><input type="text" id="adminBotName" placeholder="Assistant" /></div>
+        <div class="field"><label>Brand colour</label><input type="color" id="adminBrandColor" style="height:42px;padding:4px" /></div>
+      </div>
+      <div class="field"><label>Welcome message</label><input type="text" id="adminWelcome" placeholder="Hi! How can I help you today?" /></div>
+      <div class="field"><label>Bot profile picture <span style="color:var(--faint);font-weight:400">(optional)</span></label>
+        <input type="text" id="adminAvatarUrl" placeholder="https://…" /></div>
+      <div class="field"><label>Personality</label><textarea id="adminTone" placeholder="friendly and concise"></textarea></div>
+    </div>
+
+    <div class="card">
+      <h3>Quick reply buttons</h3>
+      <p class="hint">Shown under the welcome message so visitors can start without typing. Always exactly 4 — clear a box and it falls back to a general default for that slot.</p>
+      <div class="field"><label>Button 1</label><input type="text" id="adminQuickReply1" maxlength="60" placeholder="Hi!" /></div>
+      <div class="field"><label>Button 2</label><input type="text" id="adminQuickReply2" maxlength="60" placeholder="What do you offer?" /></div>
+      <div class="field"><label>Button 3</label><input type="text" id="adminQuickReply3" maxlength="60" placeholder="How much does it cost?" /></div>
+      <div class="field"><label>Button 4</label><input type="text" id="adminQuickReply4" maxlength="60" placeholder="How can I contact you?" /></div>
+    </div>
+
+    <div class="card">
+      <h3>What the bot knows</h3>
+      <p class="hint">Products, prices, hours, policies. The more detail, the better the answers.</p>
+      <div class="field"><label>Import from website <span style="color:var(--faint);font-weight:400">(optional)</span></label>
+        <input type="text" id="adminCrawlUrl" placeholder="https://yourbusiness.com" /></div>
+      <button class="btn btn-ghost btn-sm" id="adminCrawlBtn">Fetch content</button>
+      <div id="adminCrawlStatus"></div>
+      <div class="field" style="margin-top:15px"><label>Import from a PDF <span style="color:var(--faint);font-weight:400">(optional)</span></label>
+        <input type="file" id="adminPdfFile" accept="application/pdf" /></div>
+      <button class="btn btn-ghost btn-sm" id="adminPdfBtn">Extract text</button>
+      <div id="adminPdfStatus"></div>
+      <div class="field" style="margin-top:15px">
+        <textarea id="adminBusinessInfo" style="min-height:190px" placeholder="Describe the product, pricing, policies, shipping, support hours, etc."></textarea>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>FAQs</h3>
+      <p class="hint">Shown as tappable questions in the widget, and used as answers by the bot.</p>
+      <div id="adminFaqList"></div>
+      <button class="btn btn-ghost btn-sm" id="adminAddFaqBtn">+ Add FAQ</button>
+    </div>
+
+    <button class="btn" id="adminSaveBtn" style="margin-bottom:14px">Save & get embed code</button>
+
+    <div id="adminResult" class="card hidden">
+      <p class="hint" style="margin:0 0 8px">Paste this snippet just before <code>&lt;/body&gt;</code> on the business's site:</p>
+      <div id="adminSnippet" style="background:var(--surface-2);border:1px solid var(--line);border-radius:10px;padding:12px 14px;font-family:monospace;font-size:12.5px;word-break:break-all"></div>
+    </div>
+  </div>
+</div>
+
 <script>
 (function () {
   "use strict";
@@ -397,6 +534,7 @@
     knownWaiting: {},   // session id -> true, to detect genuinely NEW requests
     firstPoll: true,    // don't alert for the backlog already there at login
     pollTimer: null, notifySound: null, client: null,
+    adminKey: null, // only set once verified against /api/admin/workspaces -- see "platform admin" below
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -453,6 +591,7 @@
     stopPolling();
     state.me = null;
     $("app").classList.add("hidden");
+    $("adminPanel").classList.add("hidden");
     $("login").classList.remove("hidden");
   }
 
@@ -460,6 +599,7 @@
     state.me = payload.user;
     state.workspace = payload.workspace;
     $("login").classList.add("hidden");
+    $("adminPanel").classList.add("hidden");
     $("app").classList.remove("hidden");
 
     $("wsName").textContent = payload.workspace.botName || payload.workspace.id;
@@ -499,6 +639,390 @@
   $("logoutBtn").addEventListener("click", function () {
     api("/auth/logout", { method: "POST" }).finally(showLogin);
   });
+
+  // ---------- platform admin ----------
+  //
+  // A completely separate credential and code path from the workspace login
+  // above: ADMIN_KEY reaches every business on this server, so it must
+  // never be handled like a customer's cookie session. state.adminKey is
+  // only ever attached as the x-admin-key header on /api/admin/* calls,
+  // never sent anywhere else, and adminApi() below is the only thing that
+  // reads it.
+
+  if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
+    $("platformAdminKey").value = "1234";
+  }
+
+  $("adminCornerBtn").addEventListener("click", function () {
+    $("workspaceLoginBlock").classList.add("hidden");
+    $("adminLoginBlock").classList.remove("hidden");
+    $("adminCornerBtn").classList.add("hidden");
+  });
+  $("backToWorkspaceLogin").addEventListener("click", function () {
+    $("adminLoginBlock").classList.add("hidden");
+    $("workspaceLoginBlock").classList.remove("hidden");
+    $("adminCornerBtn").classList.remove("hidden");
+  });
+
+  function adminApi(path, options) {
+    options = options || {};
+    var headers = { "x-admin-key": state.adminKey };
+    if (options.body) headers["Content-Type"] = "application/json";
+    return fetch("/api/admin" + path, {
+      method: options.method || "GET",
+      headers: headers,
+      body: options.body ? JSON.stringify(options.body) : undefined,
+    }).then(function (r) {
+      return r.json().then(function (data) {
+        if (!r.ok) throw new Error(data.error || "Request failed");
+        return data;
+      });
+    });
+  }
+
+  function showAdminPanel() {
+    $("login").classList.add("hidden");
+    $("app").classList.add("hidden");
+    $("adminPanel").classList.remove("hidden");
+  }
+
+  function exitAdminPanel() {
+    state.adminKey = null;
+    $("adminPanel").classList.add("hidden");
+    $("adminLoginBlock").classList.add("hidden");
+    $("workspaceLoginBlock").classList.remove("hidden");
+    $("adminCornerBtn").classList.remove("hidden");
+    $("login").classList.remove("hidden");
+  }
+
+  $("adminLoginForm").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var btn = $("adminLoginBtn");
+    var key = $("platformAdminKey").value;
+    btn.disabled = true; btn.textContent = "Signing in…";
+    $("adminLoginErr").classList.add("hidden");
+    // No dedicated admin-login endpoint exists -- ADMIN_KEY is verified
+    // per-request, same as admin.html always did. This call both checks
+    // the key is real and gets the first workspaces list in one round trip.
+    fetch("/api/admin/workspaces", { headers: { "x-admin-key": key } })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.error || "Invalid admin key");
+        state.adminKey = key;
+        showAdminPanel();
+        renderAdminWorkspaces(res.data.workspaces);
+        $("adminWsStatus").textContent = res.data.workspaces.length + " workspace(s)";
+      })
+      .catch(function (err) {
+        $("adminLoginErr").textContent = err.message;
+        $("adminLoginErr").classList.remove("hidden");
+      })
+      .finally(function () { btn.disabled = false; btn.textContent = "Sign in as admin"; });
+  });
+
+  $("adminSignOutBtn").addEventListener("click", exitAdminPanel);
+
+  // ---- workspaces list ----
+
+  var adminEditingId = null; // non-null while the form below is editing an existing workspace
+
+  function loadAdminWorkspaces() {
+    var statusEl = $("adminWsStatus");
+    statusEl.textContent = "Loading…";
+    adminApi("/workspaces")
+      .then(function (data) {
+        statusEl.textContent = data.workspaces.length + " workspace(s)";
+        renderAdminWorkspaces(data.workspaces);
+      })
+      .catch(function (err) { statusEl.textContent = err.message; });
+  }
+
+  function renderAdminWorkspaces(workspaces) {
+    var host = $("adminWsList");
+    if (!workspaces.length) {
+      host.innerHTML = '<p class="hint">No workspaces yet — fill in the form below to create your first one.</p>';
+      return;
+    }
+    host.innerHTML = "";
+    workspaces.forEach(function (w) { host.appendChild(buildAdminWorkspaceRow(w)); });
+  }
+
+  function buildAdminWorkspaceRow(w) {
+    var row = document.createElement("div");
+    row.className = "ws-row";
+    row.dataset.id = w.id;
+
+    var main = document.createElement("div");
+    main.className = "ws-row-main";
+    main.innerHTML =
+      '<div class="ws-swatch" style="background:' + esc(w.brandColor || "#6366f1") + '"></div>' +
+      '<div class="ws-meta"><div class="ws-name">' + esc(w.botName || w.id) + '</div>' +
+      '<div class="ws-id">' + esc(w.id) + '</div></div>' +
+      '<div class="ws-stats">' +
+        '<span class="ws-pill">' + w.faqCount + ' FAQ' + (w.faqCount === 1 ? "" : "s") + '</span>' +
+        '<span class="ws-pill ws-pill-users">' + w.userCount + ' team member' + (w.userCount === 1 ? "" : "s") + '</span>' +
+      '</div>' +
+      '<svg class="ws-caret" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>';
+    main.addEventListener("click", function () {
+      var wasOpen = row.classList.contains("open");
+      row.classList.toggle("open", !wasOpen);
+      if (!wasOpen) loadAdminTeam(w.id, row.querySelector(".ws-detail"));
+    });
+
+    var detail = document.createElement("div");
+    detail.className = "ws-detail";
+    detail.innerHTML =
+      '<h4>Team</h4><div class="ws-users">Loading…</div>' +
+      '<div class="ws-add-user">' +
+        '<input type="text" class="ws-new-name" placeholder="Name" />' +
+        '<input type="email" class="ws-new-email" placeholder="Email" />' +
+        '<input type="text" class="ws-new-pass" placeholder="Password (8+ chars)" />' +
+        '<select class="ws-new-role"><option value="agent">Agent</option><option value="owner">Owner</option></select>' +
+        '<button type="button" class="btn btn-sm ws-add-user-btn">Add teammate</button>' +
+      '</div>' +
+      '<div class="ws-row-actions">' +
+        '<button type="button" class="btn btn-ghost btn-sm ws-edit">Edit workspace</button>' +
+        '<button type="button" class="btn btn-danger btn-sm ws-delete">Delete workspace</button>' +
+      '</div>';
+
+    detail.querySelector(".ws-add-user-btn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      var name = detail.querySelector(".ws-new-name").value.trim();
+      var email = detail.querySelector(".ws-new-email").value.trim();
+      var password = detail.querySelector(".ws-new-pass").value;
+      var role = detail.querySelector(".ws-new-role").value;
+      adminApi("/clients/" + encodeURIComponent(w.id) + "/users", {
+        method: "POST", body: { name: name, email: email, password: password, role: role },
+      }).then(function () {
+        detail.querySelector(".ws-new-name").value = "";
+        detail.querySelector(".ws-new-email").value = "";
+        detail.querySelector(".ws-new-pass").value = "";
+        // Refreshes this row's team + pill in place -- NOT loadAdminWorkspaces(),
+        // which rebuilds every row and would collapse the panel you just opened.
+        loadAdminTeam(w.id, detail);
+      }).catch(function (err) { toast(err.message); });
+    });
+
+    detail.querySelector(".ws-edit").addEventListener("click", function (e) {
+      e.stopPropagation();
+      editAdminWorkspace(w.id);
+    });
+
+    detail.querySelector(".ws-delete").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (!confirm('Delete "' + w.botName + '" (' + w.id + ')? This removes its knowledge base, all logins, and every conversation. This can\'t be undone.')) return;
+      adminApi("/clients/" + encodeURIComponent(w.id), { method: "DELETE" })
+        .then(function () { toast("Workspace deleted"); loadAdminWorkspaces(); })
+        .catch(function (err) { toast(err.message); });
+    });
+
+    row.appendChild(main);
+    row.appendChild(detail);
+    return row;
+  }
+
+  function loadAdminTeam(clientId, detailEl) {
+    var usersBox = detailEl.querySelector(".ws-users");
+    var pill = detailEl.closest(".ws-row").querySelector(".ws-pill-users");
+    usersBox.textContent = "Loading…";
+    adminApi("/clients/" + encodeURIComponent(clientId) + "/users")
+      .then(function (data) {
+        var users = data.users;
+        pill.textContent = users.length + " team member" + (users.length === 1 ? "" : "s");
+        if (!users.length) { usersBox.innerHTML = '<p class="hint" style="margin:0">No logins yet.</p>'; return; }
+        usersBox.innerHTML = "";
+        users.forEach(function (u) {
+          var urow = document.createElement("div");
+          urow.className = "ws-user-row";
+          urow.innerHTML =
+            "<span>" + esc(u.name) + "</span>" +
+            '<span class="email">' + esc(u.email) + "</span>" +
+            '<span class="ws-user-role">' + esc(u.role) + "</span>";
+          var del = document.createElement("button");
+          del.type = "button";
+          del.className = "btn btn-danger btn-sm";
+          del.textContent = "Remove";
+          del.addEventListener("click", function (e) {
+            e.stopPropagation();
+            if (!confirm("Remove " + u.name + "'s access?")) return;
+            adminApi("/users/" + u.id, { method: "DELETE" })
+              .then(function () { loadAdminTeam(clientId, detailEl); })
+              .catch(function (err) { toast(err.message); });
+          });
+          urow.appendChild(del);
+          usersBox.appendChild(urow);
+        });
+      })
+      .catch(function (err) { usersBox.textContent = err.message; });
+  }
+
+  // ---- create/edit workspace form ----
+
+  function editAdminWorkspace(clientId) {
+    adminApi("/clients/" + encodeURIComponent(clientId))
+      .then(function (c) {
+        fillAdminFormFromClient(c);
+        $("adminFormHeading").scrollIntoView({ behavior: "smooth", block: "start" });
+      })
+      .catch(function (err) { toast(err.message); });
+  }
+
+  function fillAdminFormFromClient(c) {
+    adminEditingId = c.id;
+    $("adminClientId").value = c.id;
+    $("adminClientId").readOnly = true;
+    $("adminBotName").value = c.botName || "";
+    $("adminBrandColor").value = c.brandColor || "#6366f1";
+    $("adminWelcome").value = c.welcomeMessage || "";
+    $("adminAvatarUrl").value = c.avatarUrl || "";
+    $("adminTone").value = c.tone || "";
+    $("adminBusinessInfo").value = c.businessInfo || "";
+    var qr = c.quickReplies || [];
+    ["adminQuickReply1", "adminQuickReply2", "adminQuickReply3", "adminQuickReply4"].forEach(function (id, i) {
+      $(id).value = qr[i] || "";
+    });
+    $("adminFaqList").innerHTML = "";
+    (c.faqs && c.faqs.length ? c.faqs : [{ question: "", answer: "" }]).forEach(function (f) {
+      addAdminFaqRow(f.question, f.answer);
+    });
+    $("adminEditingName").textContent = (c.botName || c.id) + " (" + c.id + ")";
+    $("adminEditingNotice").classList.remove("hidden");
+    $("adminFormHeading").textContent = "Editing workspace";
+    $("adminSaveBtn").textContent = "Save changes";
+    $("adminResult").classList.add("hidden");
+    $("adminFormMsg").innerHTML = "";
+  }
+
+  function resetAdminForm() {
+    adminEditingId = null;
+    $("adminClientId").value = "";
+    $("adminClientId").readOnly = false;
+    $("adminBotName").value = "";
+    $("adminBrandColor").value = "#6366f1";
+    $("adminWelcome").value = "";
+    $("adminAvatarUrl").value = "";
+    $("adminTone").value = "friendly and concise";
+    $("adminBusinessInfo").value = "";
+    ["adminQuickReply1", "adminQuickReply2", "adminQuickReply3", "adminQuickReply4"].forEach(function (id) { $(id).value = ""; });
+    $("adminFaqList").innerHTML = "";
+    addAdminFaqRow();
+    $("adminEditingNotice").classList.add("hidden");
+    $("adminFormHeading").textContent = "New workspace";
+    $("adminSaveBtn").textContent = "Save & get embed code";
+    $("adminResult").classList.add("hidden");
+    $("adminFormMsg").innerHTML = "";
+  }
+
+  $("adminWsRefresh").addEventListener("click", loadAdminWorkspaces);
+  $("adminWsNewBtn").addEventListener("click", function () {
+    resetAdminForm();
+    $("adminFormHeading").scrollIntoView({ behavior: "smooth", block: "start" });
+  });
+  $("adminCancelEdit").addEventListener("click", resetAdminForm);
+
+  function addAdminFaqRow(question, answer) {
+    var div = document.createElement("div");
+    div.className = "faq-item";
+    div.innerHTML =
+      '<div class="row"><div class="field" style="margin:0"><label>Question</label>' +
+      '<input type="text" class="faq-q" value="' + esc(question || "") + '" /></div></div>' +
+      '<div class="field" style="margin:0"><label>Answer</label>' +
+      '<textarea class="faq-a" style="min-height:64px">' + esc(answer || "") + "</textarea></div>" +
+      '<button class="btn btn-danger btn-sm faq-del" style="margin-top:9px">Remove</button>';
+    $("adminFaqList").appendChild(div);
+    bindAdminFaqDeletes();
+  }
+  function bindAdminFaqDeletes() {
+    var dels = $("adminFaqList").querySelectorAll(".faq-del");
+    for (var i = 0; i < dels.length; i++) {
+      dels[i].addEventListener("click", function () { this.closest(".faq-item").remove(); });
+    }
+  }
+  $("adminAddFaqBtn").addEventListener("click", function () { addAdminFaqRow(); });
+
+  $("adminCrawlBtn").addEventListener("click", function () {
+    var statusEl = $("adminCrawlStatus");
+    var url = $("adminCrawlUrl").value.trim();
+    if (!url) { statusEl.innerHTML = '<div class="err">Enter a URL first.</div>'; return; }
+    statusEl.innerHTML = '<div class="hint">Fetching…</div>';
+    adminApi("/crawl", { method: "POST", body: { url: url } })
+      .then(function (data) {
+        var box = $("adminBusinessInfo");
+        box.value = box.value ? box.value + "\n\n" + data.businessInfo : data.businessInfo;
+        statusEl.innerHTML = '<div class="ok">Imported ' + data.pages.length + ' page(s): ' +
+          esc(data.pages.join(", ")) + '. Review/edit the text below before saving.</div>';
+      })
+      .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
+  });
+
+  $("adminPdfBtn").addEventListener("click", function () {
+    var statusEl = $("adminPdfStatus");
+    var fileInput = $("adminPdfFile");
+    var file = fileInput.files[0];
+    if (!file) { statusEl.innerHTML = '<div class="err">Choose a PDF file first.</div>'; return; }
+    statusEl.innerHTML = '<div class="hint">Extracting…</div>';
+    var formData = new FormData();
+    formData.append("pdf", file);
+    // multipart body -- can't go through adminApi()'s JSON-only helper.
+    fetch("/api/admin/extract-pdf", { method: "POST", headers: { "x-admin-key": state.adminKey }, body: formData })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.error || "Extraction failed");
+        var box = $("adminBusinessInfo");
+        box.value = box.value ? box.value + "\n\n" + res.data.businessInfo : res.data.businessInfo;
+        statusEl.innerHTML = '<div class="ok">Imported text from ' + esc(res.data.filename) +
+          '. Review/edit the text below before saving.</div>';
+        fileInput.value = "";
+      })
+      .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
+  });
+
+  $("adminSaveBtn").addEventListener("click", function () {
+    var faqs = [];
+    var items = $("adminFaqList").querySelectorAll(".faq-item");
+    for (var i = 0; i < items.length; i++) {
+      var q = items[i].querySelector(".faq-q").value.trim();
+      var a = items[i].querySelector(".faq-a").value.trim();
+      if (q && a) faqs.push({ question: q, answer: a });
+    }
+    // Blanks sent in place, not filtered -- the server backfills each empty
+    // slot with the default for that position, so positions must line up.
+    var quickReplies = ["adminQuickReply1", "adminQuickReply2", "adminQuickReply3", "adminQuickReply4"]
+      .map(function (id) { return $(id).value.trim(); });
+
+    var payload = {
+      id: $("adminClientId").value.trim(),
+      botName: $("adminBotName").value.trim(),
+      welcomeMessage: $("adminWelcome").value.trim(),
+      brandColor: $("adminBrandColor").value,
+      avatarUrl: $("adminAvatarUrl").value.trim(),
+      tone: $("adminTone").value.trim(),
+      businessInfo: $("adminBusinessInfo").value.trim(),
+      faqs: faqs,
+      quickReplies: quickReplies,
+    };
+    if (!payload.id) {
+      $("adminFormMsg").innerHTML = '<div class="err">Client ID is required.</div>';
+      return;
+    }
+
+    adminApi("/clients", { method: "POST", body: payload })
+      .then(function () {
+        var wasNew = !adminEditingId;
+        $("adminFormMsg").innerHTML = '<div class="ok">' +
+          (wasNew ? "Saved! Expand it in the list above to add a login for this business." : "Saved!") +
+          "</div>";
+        $("adminSnippet").textContent =
+          '<script src="' + window.location.origin + '/widget.js" data-client-id="' + payload.id + '"></' + "script>";
+        $("adminResult").classList.remove("hidden");
+        loadAdminWorkspaces();
+      })
+      .catch(function (err) {
+        $("adminFormMsg").innerHTML = '<div class="err">' + esc(err.message) + "</div>";
+      });
+  });
+
+  resetAdminForm(); // seed the first blank FAQ row so the form isn't empty on first admin login
 
   // ---------- tabs ----------
 
@@ -624,6 +1148,12 @@
 
   function statusTag(s) {
     if (s.locked) return '<span class="tag ended">Ended</span>';
+    // Paused: the visitor went quiet on a live agent 30+ min ago. Not
+    // "waiting" -- it only re-enters the claimable queue once the visitor
+    // sends a new message and reopens it themselves (see reopenConversation
+    // in lib/sessions.js) -- so it gets its own distinct, low-key tag rather
+    // than looking like something needs action right now.
+    if (s.tempLocked) return '<span class="tag paused">Paused</span>';
     if (s.waiting) return '<span class="tag waiting">Waiting</span>';
     if (s.agentUserId === state.me.id) return '<span class="tag mine">You</span>';
     if (s.agent) return '<span class="tag taken">' + esc(s.agent.name) + "</span>";
@@ -738,6 +1268,11 @@
     var foot;
     if (s.locked) {
       foot = '<div class="claim-bar"><div class="txt">This conversation has ended. The visitor can no longer reply.</div></div>';
+    } else if (s.tempLocked) {
+      // No action to offer here -- claiming only becomes possible again
+      // once the visitor sends a new message and reopens it themselves
+      // (server enforces this too, see the tempLocked guard on /claim).
+      foot = '<div class="claim-bar"><div class="txt">This conversation is temporarily paused — waiting for the visitor to send a message and reopen it.</div></div>';
     } else if (mine) {
       foot = '<div class="composer"><div class="composer-row">' +
         '<textarea id="replyBox" placeholder="Type your reply… (Enter to send)"></textarea>' +

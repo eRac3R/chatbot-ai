@@ -62,12 +62,16 @@
   // (reply/poll payload's `agent` field), this swaps to their name/photo.
   var currentResponder = null;
 
-  // Requested-but-not-yet-joined ("connecting…") and ended-and-locked, for
-  // the currently open conversation. Both come from the server (poll/chat
-  // responses) via applyConversationState -- see server/lib/sessions.js for
-  // what sets them (requestAgent, and the idle-timeout auto-close).
+  // Requested-but-not-yet-joined ("connecting…"), permanently-ended, and
+  // temporarily-paused, for the currently open conversation. All three come
+  // from the server (poll/chat responses) via applyConversationState -- see
+  // server/lib/sessions.js for what sets them (requestAgent,
+  // closeConversation, and the 30-minute agent-idle auto-pause). A paused
+  // conversation is reversible -- the visitor just sends another message --
+  // so unlike conversationLocked it does NOT disable the composer.
   var conversationAgentRequested = false;
   var conversationLocked = false;
+  var conversationTempLocked = false;
 
   var els = {};
   var isOpen = false;
@@ -388,13 +392,21 @@
   }
 
   // Status line + "talk to a live agent" bar + composer lock, all driven by
-  // the same three bits of state: is an agent attached (currentResponder),
+  // the same four bits of state: is an agent attached (currentResponder),
   // has one been requested but not joined yet (conversationAgentRequested),
-  // has the conversation auto-ended (conversationLocked). Called whenever
-  // any of those change while the chat view is showing.
+  // has the conversation permanently ended (conversationLocked), has it
+  // temporarily paused (conversationTempLocked). Called whenever any of
+  // those change while the chat view is showing.
+  //
+  // Only conversationLocked disables the composer -- a paused conversation
+  // is reopened by typing into it, so it has to stay usable. That's also
+  // why input.disabled/send.disabled/placeholder below are keyed on
+  // conversationLocked alone, unchanged from before this state existed.
   function updateChatStatusUI() {
     if (conversationLocked) {
       els.statusText.textContent = "Conversation ended";
+    } else if (conversationTempLocked) {
+      els.statusText.textContent = "Chat paused";
     } else if (currentResponder) {
       els.statusText.textContent = "Live agent";
     } else if (conversationAgentRequested) {
@@ -404,20 +416,26 @@
     }
     els.status.style.display = "";
 
-    var showRequestBtn = !conversationLocked && !conversationAgentRequested && !currentResponder;
+    var showRequestBtn =
+      !conversationLocked && !conversationTempLocked && !conversationAgentRequested && !currentResponder;
     els.agentRequestBar.style.display = showRequestBtn ? "flex" : "none";
 
     els.input.disabled = conversationLocked;
     els.send.disabled = conversationLocked || sendInFlight;
-    els.input.placeholder = conversationLocked ? "This conversation has ended" : "Type a message…";
+    els.input.placeholder = conversationLocked
+      ? "This conversation has ended"
+      : conversationTempLocked
+      ? "Send a message to reopen this chat…"
+      : "Type a message…";
   }
 
-  // Applies agentRequested/locked from a server response (poll, chat, or
-  // request-agent) to the currently open conversation's UI state.
+  // Applies agentRequested/locked/tempLocked from a server response (poll,
+  // chat, or request-agent) to the currently open conversation's UI state.
   function applyConversationState(data) {
     if (!data) return;
     if (typeof data.agentRequested === "boolean") conversationAgentRequested = data.agentRequested;
     if (typeof data.locked === "boolean") conversationLocked = data.locked;
+    if (typeof data.tempLocked === "boolean") conversationTempLocked = data.tempLocked;
     if (currentView === "chat") updateChatStatusUI();
   }
 
@@ -833,6 +851,7 @@
     currentResponder = null;
     conversationAgentRequested = false;
     conversationLocked = false;
+    conversationTempLocked = false;
   }
 
   // Tappable reply chips shown inline in the chat -- the client's configured

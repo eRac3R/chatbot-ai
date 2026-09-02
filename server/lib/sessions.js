@@ -18,11 +18,23 @@ const { redis, hasRedis } = require("./store");
 //     agent: null | { name, avatarUrl },
 //     agentRequested: boolean,   // visitor asked for a human; AI stops even
 //                                // before one actually joins (agent is set)
-//     locked: boolean,           // conversation auto-ended (see idle
-//                                // timeout below); visitor can no longer post
+//     locked: boolean,           // PERMANENTLY ended (an agent chose to end
+//                                // it, see closeConversation) -- visitor can
+//                                // never post again, no reopen
+//     tempLocked: boolean,       // TEMPORARILY paused (30 min of visitor
+//                                // silence with a live agent, see
+//                                // maybeAutoPauseIdleSession below) --
+//                                // visitor can reopen it just by sending a
+//                                // new message; any agent can then claim it
 //     messages: [ { seq, ts, role, content, sender? } ],
 //     updatedAt
 //   }
+//
+// Two clocks govern how long a stale conversation stays reachable at all:
+// tempLocked is about a *live agent's* time (30 min, see
+// AGENT_IDLE_TIMEOUT_MINUTES below); SESSION_TTL_DAYS (1 day, sliding on
+// every write) is the outer bound -- once that lapses the whole session is
+// gone from storage, reopen or not. That's this project's "fully close".
 //
 // role is "user" | "assistant". An assistant message carries `sender` only
 // when a human agent wrote it; bot messages have none and the widget falls
@@ -41,14 +53,20 @@ const SESSION_TTL_DAYS = Number(process.env.SESSION_TTL_DAYS) || 1;
 const SESSION_TTL_SECONDS = Math.max(1, SESSION_TTL_DAYS) * 24 * 60 * 60;
 
 // Once a human agent has joined, how long the visitor can go quiet before
-// the conversation auto-ends and locks. Minutes, not the usual days -- this
-// is about a live agent's time, not archival retention.
-const AGENT_IDLE_TIMEOUT_MINUTES = Number(process.env.AGENT_IDLE_TIMEOUT_MINUTES) || 10;
+// the conversation auto-*pauses* (tempLocked, not locked -- see the shape
+// comment above). Minutes, not the usual days -- this is about a live
+// agent's time, not archival retention. Reversible: the visitor reopens it
+// just by sending another message, and it goes back into the claimable
+// queue for any agent, not necessarily the one who had it before.
+const AGENT_IDLE_TIMEOUT_MINUTES = Number(process.env.AGENT_IDLE_TIMEOUT_MINUTES) || 30;
 const AGENT_IDLE_TIMEOUT_MS = Math.max(1, AGENT_IDLE_TIMEOUT_MINUTES) * 60 * 1000;
-const CONVERSATION_ENDED_MESSAGE =
-  "This conversation has ended due to inactivity. Start a new conversation any time.";
-// Distinct wording from the idle-timeout message above -- an agent choosing
-// to end things reads very differently to a visitor than "you went quiet".
+const CONVERSATION_PAUSED_MESSAGE =
+  "This conversation has been temporarily closed due to inactivity. Send a message here any time to reopen it and reconnect with our team.";
+const CONVERSATION_REOPENED_MESSAGE =
+  "Welcome back — reconnecting you with our team.";
+// Distinct wording from the pause message above -- an agent choosing to end
+// things outright reads very differently to a visitor than "you went quiet
+// for a while", and unlike a pause this one has no reopen.
 const CONVERSATION_CLOSED_MESSAGE =
   "This conversation has been closed by our team. Start a new conversation any time.";
 
@@ -80,6 +98,7 @@ function newSession(sessionId, clientId, visitorId, ip) {
     agent: null,
     agentRequested: false,
     locked: false,
+    tempLocked: false,
     messages: [],
     // Fixed at creation, unlike updatedAt -- this is what same-IP grouping
     // sorts by, so a group's position in the list can't shift just because
@@ -116,34 +135,54 @@ async function getSession(sessionId) {
     session = memSessions.get(sessionId) || null;
   }
   if (!session) return null;
-  return maybeAutoCloseIdleSession(session);
+  return maybeAutoPauseIdleSession(session);
 }
 
 // Runs on every read (see getSession), not on a timer -- there's no
 // always-on process to run one, especially on a serverless host. If a human
 // agent is engaged and the visitor hasn't posted in AGENT_IDLE_TIMEOUT_MS,
-// the conversation ends and locks the next time anything touches it (a
-// poll, a send attempt, an agent/admin reading it). A conversation that's
-// never read again while idle just never gets closed -- acceptable, since
-// nothing is waiting on it either.
-async function maybeAutoCloseIdleSession(session) {
-  if (!session.agent || session.locked) return session;
+// the conversation *pauses* (tempLocked) the next time anything touches it
+// (a poll, a send attempt, an agent/admin reading it). Unlike the old
+// behaviour this doesn't end the conversation -- releasing the agent and
+// setting tempLocked leaves agentRequested untouched, so the moment the
+// visitor sends a new message (see reopenConversation, called from
+// routes/chat.js) it reads as "waiting" again and re-enters the claimable
+// queue for any agent. A conversation that's never read again while idle
+// just never gets paused -- acceptable, since nothing is waiting on it
+// either, and it'll still fall out of storage entirely once SESSION_TTL_DAYS
+// of total inactivity passes.
+async function maybeAutoPauseIdleSession(session) {
+  if (!session.agent || session.locked || session.tempLocked) return session;
   const lastUserMessage = session.messages.filter((m) => m.role === "user").pop();
   if (!lastUserMessage) return session;
 
   // Measure idleness from whichever came last: the visitor's last message
   // or the moment an agent actually joined. Using the message alone means a
-  // request that sat in the queue longer than the timeout gets closed the
+  // request that sat in the queue longer than the timeout gets paused the
   // instant someone picks it up -- which is the normal case, since agents
   // aren't waiting by the screen. The visitor gets a full window to respond
   // to the agent's first "hello" either way.
   const idleSince = Math.max(lastUserMessage.ts, session.agentAssignedAt || 0);
   if (Date.now() - idleSince < AGENT_IDLE_TIMEOUT_MS) return session;
 
-  session.locked = true;
+  session.tempLocked = true;
   session.agent = null;
   session.agentUserId = null;
-  await appendMessage(session, { role: "assistant", content: CONVERSATION_ENDED_MESSAGE });
+  await appendMessage(session, { role: "assistant", content: CONVERSATION_PAUSED_MESSAGE });
+  return session;
+}
+
+// The visitor's side of coming back after a pause: sending any new message
+// while tempLocked clears it and posts a short "welcome back" note.
+// agentRequested was never touched by the pause, so the conversation reads
+// as "waiting" again the moment this returns -- any agent can claim it, not
+// necessarily whoever had it before. Called from routes/chat.js, after the
+// visitor's own message has already been appended (mirrors requestAgent's
+// pattern: the visitor's action comes first, the canned message follows).
+async function reopenConversation(session) {
+  if (!session.tempLocked) return session;
+  session.tempLocked = false;
+  await appendMessage(session, { role: "assistant", content: CONVERSATION_REOPENED_MESSAGE });
   return session;
 }
 
@@ -261,7 +300,8 @@ async function assignAgent(session, agent) {
   session.agent = { name: agent.name, avatarUrl: agent.avatarUrl || "" };
   session.agentUserId = agent.userId || null;
   session.agentRequested = true;
-  // Restarts the idle clock -- see maybeAutoCloseIdleSession.
+  session.tempLocked = false; // claiming a just-reopened conversation clears any leftover pause state
+  // Restarts the idle clock -- see maybeAutoPauseIdleSession.
   session.agentAssignedAt = Date.now();
   await saveSession(session);
   return session;
@@ -274,19 +314,22 @@ async function releaseAgent(session) {
   session.agent = null;
   session.agentUserId = null;
   session.agentRequested = false;
+  session.tempLocked = false;
   await saveSession(session);
   return session;
 }
 
 // An agent ending a conversation outright, as opposed to releaseAgent
-// (hands back to the bot, conversation stays open). Locks it like the idle
-// timeout does -- the visitor can no longer post -- but with wording that
-// makes clear a person chose to end it, not that they were timed out.
-// Idempotent: closing an already-closed conversation is a no-op rather than
-// posting the message twice.
+// (hands back to the bot, conversation stays open) or the automatic pause
+// (tempLocked, reversible by the visitor). Permanently locks it -- the
+// visitor can never post again, no reopen -- with wording that makes clear
+// a person chose to end it, not that they were timed out. Idempotent:
+// closing an already-closed conversation is a no-op rather than posting the
+// message twice.
 async function closeConversation(session) {
   if (session.locked) return session;
   session.locked = true;
+  session.tempLocked = false;
   session.agent = null;
   session.agentUserId = null;
   session.agentRequested = false;
@@ -316,9 +359,12 @@ function summarizeForAgent(session) {
     agentRequested: !!session.agentRequested,
     agentRequestedAt: session.agentRequestedAt || null,
     locked: !!session.locked,
+    tempLocked: !!session.tempLocked,
     // "Someone asked for a human and nobody has picked it up" -- the queue
-    // the dashboard notifies on.
-    waiting: !!session.agentRequested && !session.agent && !session.locked,
+    // the dashboard notifies on. A paused (tempLocked) conversation is
+    // deliberately excluded: it only becomes claimable again once the
+    // visitor reopens it (see reopenConversation), not the moment it pauses.
+    waiting: !!session.agentRequested && !session.agent && !session.locked && !session.tempLocked,
     seq: session.seq,
     messageCount: session.messages.length,
     updatedAt: session.updatedAt,
@@ -446,6 +492,7 @@ module.exports = {
   releaseAgent,
   closeConversation,
   requestAgent,
+  reopenConversation,
   listSessions,
   listVisitorConversations,
   summarizeForAgent,

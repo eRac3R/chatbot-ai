@@ -276,33 +276,55 @@ discounts" moments after an agent granted 15% off). It will now honor and
 reference the agent's promise while still refusing to invent a bigger one
 itself.
 
-**Idle timeout.** Once an agent has joined, if the visitor goes quiet for
-`AGENT_IDLE_TIMEOUT_MINUTES` (default 10), the conversation auto-ends: a
-"This conversation has ended due to inactivity" message is posted, the
-agent is released, and the conversation is permanently `locked` — the
-widget disables its composer, and `POST /api/chat` / the admin `/reply`
-endpoint both 409 on it from then on. There's no timer process (doesn't
-exist in a serverless world); the check runs lazily inside `getSession`
-(`maybeAutoCloseIdleSession`), i.e. the *next* time anything touches the
-conversation — a poll, a send attempt, an agent reading it — not necessarily
-exactly 10 minutes to the second. The timeout only applies once an agent
-has actually joined; a visitor who requested one and is still waiting can
-wait indefinitely.
+**Two tiers of "closed".** A stale conversation doesn't just die outright —
+it pauses first, reversibly, and only truly disappears much later:
 
-The clock runs from whichever is later, the visitor's last message or the
-moment the agent joined (`agentAssignedAt`). Using the message alone meant
-that picking up any request which had queued longer than the timeout closed
-it instantly — the normal case, since agents aren't sitting on the screen
-waiting.
+- **Temporary pause (`AGENT_IDLE_TIMEOUT_MINUTES`, default 30).** Once an
+  agent has joined, if the visitor goes quiet for this long, the
+  conversation *pauses* (`tempLocked: true`, distinct from `locked` — see
+  the shape comment atop `lib/sessions.js`): the agent is released, it drops
+  out of the dashboard's waiting queue, and a "This conversation has been
+  temporarily closed due to inactivity" message posts. Unlike the old
+  behavior this isn't the end — `agentRequested` is deliberately left
+  untouched, so the moment the visitor sends **any** new message
+  (`reopenConversation`, called from `routes/chat.js`), it clears, posts a
+  "Welcome back" note, and the conversation reads as *waiting* again. Any
+  agent can then claim it — not necessarily whoever had it before — since
+  claim/reply/release on a paused conversation all 409 with a clear "waiting
+  for the visitor to reopen it" error until that happens. The widget's
+  composer deliberately stays enabled through all of this (only permanent
+  `locked` disables it) — typing is literally how a visitor reopens a
+  paused chat, so status text and placeholder change ("Chat paused" / "Send
+  a message to reopen this chat…") but nothing gets locked out.
+- **Full close (`SESSION_TTL_DAYS`, default 1, see Setup below).** Whatever
+  happens with the tier above, the whole conversation still expires from
+  storage after a full day of *no activity at all* (sliding — every write,
+  including the pause/reopen system messages, pushes it out again). That's
+  this project's "fully closed, gone for good": no code path resurrects it,
+  the visitor's Messages tab simply won't show it, and a returning visitor
+  starts fresh. The two tiers are independent mechanisms (one an in-app
+  flag, the other Redis/memory key expiry), not layered on top of each
+  other.
+
+Like before, there's no timer process (doesn't exist in a serverless
+world); the pause check runs lazily inside `getSession`
+(`maybeAutoPauseIdleSession`), i.e. the *next* time anything touches the
+conversation — a poll, a send attempt, an agent reading it — not necessarily
+exactly 30 minutes to the second. It only applies once an agent has
+actually joined; a visitor who requested one and is still waiting in the
+queue can wait indefinitely. The clock runs from whichever is later, the
+visitor's last message or the moment the agent joined (`agentAssignedAt`) —
+using the message alone would pause any request that had queued longer than
+the timeout the instant someone finally picked it up.
 
 Two things to know before putting agents in front of customers:
 - Delivery is 4-second polling while the widget is open, not websockets.
   Fine at small scale and it works on Vercel (which doesn't hold persistent
   connections); revisit if you need instant delivery or have many concurrent
   chats.
-- The idle timeout is per-conversation wall-clock time based on the
+- The pause timeout is per-conversation wall-clock time based on the
   visitor's last message, not tied to the widget being open — closing the
-  browser doesn't pause the clock.
+  browser doesn't pause the clock (no pun intended).
 
 ### The Agent Desk (`/app.html`)
 
@@ -312,6 +334,20 @@ password": **`/api/admin` is the platform owner (us) and can reach every
 client; `/api/workspace` is a customer and can only ever reach their own.**
 No workspace route reads a `clientId` from the request — it always comes off
 the authenticated user, so editing a URL can't cross the boundary.
+
+**Platform admin lives on the same login screen now, not a separate page.**
+An "Admin" button in the login screen's top-right corner swaps the card into
+a one-field `ADMIN_KEY` form; on success it opens `#adminPanel` — the exact
+same workspaces-list-plus-create/edit-form that `admin.html` has always had,
+just dark-themed to match the rest of the Agent Desk and reusing its
+existing `.card`/`.field`/`.faq-item` styles rather than new CSS. This is
+purely a *front-end* merge: `state.adminKey` is a plain JS variable used
+only as the `x-admin-key` header on `/api/admin/*` calls (via a separate
+`adminApi()` helper, never the cookie-based `api()` the workspace login
+uses) — it is never written to a cookie or persisted, so a page reload
+signs the platform admin out but leaves any workspace session alone.
+`admin.html` itself is untouched and still works standalone; this just
+means you no longer have to leave `/app.html` to onboard a business.
 
 **Two roles.** `owner` is the business: answers chats *and* edits the
 knowledge base, branding and team. `agent` is their staff: chats only. The
@@ -356,7 +392,9 @@ workspace that no longer exists.
 **The inbox.** Polls `GET /api/workspace/inbox` every 4 seconds (again: no
 sockets on serverless) and splits conversations into Waiting / Mine / All.
 A conversation is *waiting* when the visitor asked for a human and nobody
-has picked it up (`agentRequested && !agent && !locked`).
+has picked it up (`agentRequested && !agent && !locked && !tempLocked`) — a
+paused conversation gets its own low-key "Paused" tag instead and drops out
+of Waiting until the visitor reopens it (see Live agent handoff above).
 
 **Notifications.** Every signed-in agent sees the same queue, so a new
 request alerts all of them at once: a red badge, a count in the tab title, a
@@ -390,14 +428,16 @@ compare-and-set in Redis.
 
 **Ending a conversation.** An agent can end a conversation outright
 (`POST /api/workspace/sessions/:id/close`), not just hand it back to the
-bot. Unlike release, this locks it the same way the idle timeout does — the
-visitor can no longer reply — but with different wording
-(`CONVERSATION_CLOSED_MESSAGE` in `lib/sessions.js`) so a visitor can tell
-"an agent ended this" apart from "you went quiet too long." Available
-whether the bot is still handling it, it's sitting unclaimed in the queue,
-or this agent holds it themselves; a teammate's active chat is off limits,
-the same rule claim/reply already enforce. The dashboard asks for
-confirmation before calling it, since there's no undo.
+bot. Unlike release (or the automatic pause above), this permanently locks
+it — the visitor can never reply again, no reopen — with wording
+(`CONVERSATION_CLOSED_MESSAGE` in `lib/sessions.js`) that makes clear a
+person chose to end it, not that they were timed out or went quiet.
+Available whether the bot is still handling it, it's sitting unclaimed in
+the queue, this agent holds it themselves, or it's currently paused (a
+paused conversation has no holder, so there's no ownership conflict to
+check); a teammate's *active* chat is the one thing off limits, same rule
+claim/reply already enforce. The dashboard asks for confirmation before
+calling it, since there's no undo.
 
 ## Setup
 
