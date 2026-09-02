@@ -499,10 +499,13 @@
         <input type="text" id="adminCrawlUrl" placeholder="https://yourbusiness.com" /></div>
       <button class="btn btn-ghost btn-sm" id="adminCrawlBtn">Fetch content</button>
       <div id="adminCrawlStatus"></div>
-      <div class="field" style="margin-top:15px"><label>Import from a PDF <span style="color:var(--faint);font-weight:400">(optional)</span></label>
+      <div class="field" style="margin-top:15px"><label>Import from a PDF <span style="color:var(--faint);font-weight:400">(optional — extracts automatically as soon as you choose a file)</span></label>
         <input type="file" id="adminPdfFile" accept="application/pdf" /></div>
-      <button class="btn btn-ghost btn-sm" id="adminPdfBtn">Extract text</button>
       <div id="adminPdfStatus"></div>
+      <div class="field hidden" id="adminPdfExtractedWrap" style="margin-top:11px">
+        <label>Extracted from PDF <span style="color:var(--faint);font-weight:400">(review/edit — merges into business info below only when you save)</span></label>
+        <textarea id="adminPdfExtractedInfo" style="min-height:120px"></textarea>
+      </div>
       <div class="field" style="margin-top:15px">
         <textarea id="adminBusinessInfo" style="min-height:190px" placeholder="Describe the product, pricing, policies, shipping, support hours, etc."></textarea>
       </div>
@@ -877,6 +880,10 @@
     $("adminAvatarUrl").value = c.avatarUrl || "";
     $("adminTone").value = c.tone || "";
     $("adminBusinessInfo").value = c.businessInfo || "";
+    $("adminPdfExtractedInfo").value = "";
+    $("adminPdfExtractedWrap").classList.add("hidden");
+    $("adminPdfFile").value = "";
+    $("adminPdfStatus").innerHTML = "";
     var qr = c.quickReplies || [];
     ["adminQuickReply1", "adminQuickReply2", "adminQuickReply3", "adminQuickReply4"].forEach(function (id, i) {
       $(id).value = qr[i] || "";
@@ -903,6 +910,10 @@
     $("adminAvatarUrl").value = "";
     $("adminTone").value = "friendly and concise";
     $("adminBusinessInfo").value = "";
+    $("adminPdfExtractedInfo").value = "";
+    $("adminPdfExtractedWrap").classList.add("hidden");
+    $("adminPdfFile").value = "";
+    $("adminPdfStatus").innerHTML = "";
     ["adminQuickReply1", "adminQuickReply2", "adminQuickReply3", "adminQuickReply4"].forEach(function (id) { $(id).value = ""; });
     $("adminFaqList").innerHTML = "";
     addAdminFaqRow();
@@ -955,11 +966,15 @@
       .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
   });
 
-  $("adminPdfBtn").addEventListener("click", function () {
+  // Extraction runs automatically the moment a file is chosen -- no
+  // separate "Extract" button. It lands in its own box (adminPdfExtractedInfo)
+  // rather than being spliced into adminBusinessInfo immediately, so it's
+  // reviewable/editable on its own and doesn't touch what's already been
+  // typed until Save actually merges the two (see the save handler below).
+  $("adminPdfFile").addEventListener("change", function () {
     var statusEl = $("adminPdfStatus");
-    var fileInput = $("adminPdfFile");
-    var file = fileInput.files[0];
-    if (!file) { statusEl.innerHTML = '<div class="err">Choose a PDF file first.</div>'; return; }
+    var file = this.files[0];
+    if (!file) return;
     statusEl.innerHTML = '<div class="hint">Extracting…</div>';
     var formData = new FormData();
     formData.append("pdf", file);
@@ -968,11 +983,10 @@
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         if (!res.ok) throw new Error(res.data.error || "Extraction failed");
-        var box = $("adminBusinessInfo");
-        box.value = box.value ? box.value + "\n\n" + res.data.businessInfo : res.data.businessInfo;
-        statusEl.innerHTML = '<div class="ok">Imported text from ' + esc(res.data.filename) +
-          '. Review/edit the text below before saving.</div>';
-        fileInput.value = "";
+        $("adminPdfExtractedInfo").value = res.data.businessInfo;
+        $("adminPdfExtractedWrap").classList.remove("hidden");
+        statusEl.innerHTML = '<div class="ok">Extracted text from ' + esc(res.data.filename) +
+          " — review it below, it merges in automatically when you save.</div>";
       })
       .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
   });
@@ -990,6 +1004,13 @@
     var quickReplies = ["adminQuickReply1", "adminQuickReply2", "adminQuickReply3", "adminQuickReply4"]
       .map(function (id) { return $(id).value.trim(); });
 
+    // The PDF box is a staging area, kept separate from adminBusinessInfo so
+    // an extraction never overwrites what's already been typed -- the two
+    // only combine right here, at the moment of saving.
+    var manualInfo = $("adminBusinessInfo").value.trim();
+    var pdfInfo = $("adminPdfExtractedInfo").value.trim();
+    var businessInfo = manualInfo && pdfInfo ? manualInfo + "\n\n" + pdfInfo : (manualInfo || pdfInfo);
+
     var payload = {
       id: $("adminClientId").value.trim(),
       botName: $("adminBotName").value.trim(),
@@ -997,7 +1018,7 @@
       brandColor: $("adminBrandColor").value,
       avatarUrl: $("adminAvatarUrl").value.trim(),
       tone: $("adminTone").value.trim(),
-      businessInfo: $("adminBusinessInfo").value.trim(),
+      businessInfo: businessInfo,
       faqs: faqs,
       quickReplies: quickReplies,
     };
@@ -1015,6 +1036,14 @@
         $("adminSnippet").textContent =
           '<script src="' + window.location.origin + '/widget.js" data-client-id="' + payload.id + '"></' + "script>";
         $("adminResult").classList.remove("hidden");
+        // Fold the merge into the visible box and clear the staging area --
+        // the server only ever stores one businessInfo string, so once
+        // saved there's nothing left to keep separate.
+        $("adminBusinessInfo").value = businessInfo;
+        $("adminPdfExtractedInfo").value = "";
+        $("adminPdfExtractedWrap").classList.add("hidden");
+        $("adminPdfFile").value = "";
+        $("adminPdfStatus").innerHTML = "";
         loadAdminWorkspaces();
       })
       .catch(function (err) {

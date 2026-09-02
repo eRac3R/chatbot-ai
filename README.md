@@ -80,9 +80,9 @@ any website; each business gets its own knowledge base (product info + FAQs).
   `server/lib/sessions.js` transparently switch to Redis instead, since
   serverless hosts don't offer a persistent disk or long-lived memory.
 
-Knowledge base entry has three paths, all landing in the same `businessInfo`
-field on `admin.html` for review before saving — none of them save
-automatically:
+Knowledge base entry has three paths feeding one `businessInfo` field,
+present identically in `admin.html` and the ported admin panel inside
+`/app.html`:
 - **Manual** — paste product info and add FAQs directly.
 - **Import from website** — enter the business's URL and click "Fetch
   content"; `server/lib/crawler.js` fetches the page plus a few same-domain
@@ -90,11 +90,21 @@ automatically:
   text. Capped (5 pages, ~12k characters total, 8s timeout per page, 2MB per
   page) and refuses to fetch private/internal IP addresses. Doesn't render
   JS-heavy sites (no headless browser) — for those, use manual entry instead.
-- **Import from PDF** — upload a product brochure, spec sheet, or price list
-  and click "Extract text"; `server/lib/pdfExtractor.js` pulls the text out
-  (15MB max, ~12k characters kept). Scanned/image-only PDFs (no real text
-  layer) won't extract anything — you'd need to retype that content or paste
-  it manually.
+  Merges straight into the businessInfo box on fetch, no separate save step
+  before it's visible there.
+- **Import from PDF** — choosing a file (no separate "Extract" button)
+  immediately calls `server/lib/pdfExtractor.js` (15MB max, ~12k characters
+  kept; scanned/image-only PDFs with no real text layer won't extract
+  anything, retype or paste that content manually). Unlike the website
+  import, the result lands in its *own* box, not directly in businessInfo —
+  the two only merge (manual text + a blank line + the PDF text) at the
+  moment Save is clicked, computed client-side and folded back into the
+  visible businessInfo box once the save succeeds. This means uploading the
+  wrong PDF, or wanting to trim what it pulled out, never clobbers text
+  that's already been typed — review/edit the extracted box freely before
+  saving, or just clear it. Nothing about this path saves automatically;
+  only the `<input type="file">`'s `change` event is automatic, the actual
+  write to the workspace still needs the explicit Save click.
 
 ### Widget navigation
 

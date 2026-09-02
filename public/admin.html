@@ -133,15 +133,16 @@
     </div>
     <div id="crawlStatus"></div>
 
-    <label for="pdfFile">Import from a PDF <small>(optional — extracts text from a product brochure, spec sheet, price list, etc. and adds it below)</small></label>
-    <div class="faq-row">
-      <input type="file" id="pdfFile" accept="application/pdf" />
-      <button type="button" id="pdfBtn">Extract text</button>
-    </div>
+    <label for="pdfFile">Import from a PDF <small>(optional — extracts text from a product brochure, spec sheet, price list, etc. automatically, as soon as you choose a file)</small></label>
+    <input type="file" id="pdfFile" accept="application/pdf" />
     <div id="pdfStatus"></div>
+    <div id="pdfExtractedWrap" style="display:none">
+      <label for="pdfExtractedInfo">Extracted from PDF <small>(review/edit here — merged into the business info below automatically when you save, doesn't touch it before then)</small></label>
+      <textarea id="pdfExtractedInfo"></textarea>
+    </div>
 
     <label for="businessInfo">Business / product info <small>(the more detail, the better the answers)</small></label>
-    <textarea id="businessInfo" placeholder="Describe your product, pricing, policies, shipping, support hours, etc." required></textarea>
+    <textarea id="businessInfo" placeholder="Describe your product, pricing, policies, shipping, support hours, etc."></textarea>
 
     <fieldset>
       <legend>FAQs (optional)</legend>
@@ -337,6 +338,10 @@
     document.getElementById("avatarUrl").value = c.avatarUrl || "";
     document.getElementById("tone").value = c.tone || "";
     document.getElementById("businessInfo").value = c.businessInfo || "";
+    document.getElementById("pdfExtractedInfo").value = "";
+    document.getElementById("pdfExtractedWrap").style.display = "none";
+    document.getElementById("pdfFile").value = "";
+    document.getElementById("pdfStatus").textContent = "";
     var qr = c.quickReplies || [];
     ["quickReply1", "quickReply2", "quickReply3", "quickReply4"].forEach(function (id, i) {
       document.getElementById(id).value = qr[i] || "";
@@ -357,6 +362,8 @@
     document.getElementById("clientId").readOnly = false;
     document.getElementById("brandColor").value = "#6366f1";
     document.getElementById("tone").value = "friendly and concise";
+    document.getElementById("pdfExtractedWrap").style.display = "none";
+    document.getElementById("pdfStatus").textContent = "";
     faqList.innerHTML = "";
     addFaqRow();
     document.getElementById("wsEditingNotice").style.display = "none";
@@ -421,13 +428,22 @@
       });
   });
 
-  document.getElementById("pdfBtn").addEventListener("click", function () {
+  // Extraction runs automatically the moment a file is chosen -- no
+  // separate "Extract" button. It lands in its own box rather than being
+  // spliced into businessInfo immediately, so it's reviewable/editable on
+  // its own and doesn't touch what's already been typed until Save
+  // actually merges the two (see the submit handler below).
+  document.getElementById("pdfFile").addEventListener("change", function () {
     var pdfStatus = document.getElementById("pdfStatus");
-    var fileInput = document.getElementById("pdfFile");
+    var file = this.files[0];
     var adminKey = document.getElementById("adminKey").value;
-    var file = fileInput.files[0];
-    if (!file) { pdfStatus.textContent = "Choose a PDF file first."; pdfStatus.className = "error"; return; }
-    if (!adminKey) { pdfStatus.textContent = "Enter your admin key first."; pdfStatus.className = "error"; return; }
+    if (!file) return;
+    if (!adminKey) {
+      pdfStatus.textContent = "Enter your admin key first.";
+      pdfStatus.className = "error";
+      this.value = "";
+      return;
+    }
 
     pdfStatus.textContent = "Extracting text from " + file.name + "...";
     pdfStatus.className = "";
@@ -443,11 +459,10 @@
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         if (!res.ok) throw new Error(res.data.error || "Extraction failed");
-        var box = document.getElementById("businessInfo");
-        box.value = box.value ? box.value + "\n\n" + res.data.businessInfo : res.data.businessInfo;
-        pdfStatus.textContent = "Imported text from " + res.data.filename + ". Review/edit the text below before saving.";
+        document.getElementById("pdfExtractedInfo").value = res.data.businessInfo;
+        document.getElementById("pdfExtractedWrap").style.display = "";
+        pdfStatus.textContent = "Extracted text from " + res.data.filename + " — review it below, it merges in automatically when you save.";
         pdfStatus.className = "success";
-        fileInput.value = "";
       })
       .catch(function (err) {
         pdfStatus.textContent = err.message;
@@ -482,6 +497,13 @@
     var quickReplies = ["quickReply1", "quickReply2", "quickReply3", "quickReply4"]
       .map(function (id) { return document.getElementById(id).value.trim(); });
 
+    // The PDF box is a staging area, kept separate from businessInfo so an
+    // extraction never overwrites what's already been typed -- the two only
+    // combine right here, at the moment of saving.
+    var manualInfo = document.getElementById("businessInfo").value.trim();
+    var pdfInfo = document.getElementById("pdfExtractedInfo").value.trim();
+    var businessInfo = manualInfo && pdfInfo ? manualInfo + "\n\n" + pdfInfo : (manualInfo || pdfInfo);
+
     var payload = {
       id: document.getElementById("clientId").value.trim(),
       botName: document.getElementById("botName").value.trim(),
@@ -489,7 +511,7 @@
       brandColor: document.getElementById("brandColor").value,
       avatarUrl: document.getElementById("avatarUrl").value.trim(),
       tone: document.getElementById("tone").value.trim(),
-      businessInfo: document.getElementById("businessInfo").value.trim(),
+      businessInfo: businessInfo,
       faqs: faqs,
       quickReplies: quickReplies,
     };
@@ -510,6 +532,14 @@
           ? "Saved! Expand it in the list above to add a login for this business."
           : "Saved!";
         status.className = "success";
+        // Fold the merge into the visible box and clear the staging area --
+        // the server only ever stores one businessInfo string, so once
+        // saved there's nothing left to keep separate.
+        document.getElementById("businessInfo").value = businessInfo;
+        document.getElementById("pdfExtractedInfo").value = "";
+        document.getElementById("pdfExtractedWrap").style.display = "none";
+        document.getElementById("pdfFile").value = "";
+        document.getElementById("pdfStatus").textContent = "";
         var snippet =
           '<script src="' + window.location.origin + '/widget.js" data-client-id="' + payload.id + '"><' + '/script>';
         document.getElementById("snippet").textContent = snippet;
