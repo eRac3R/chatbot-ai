@@ -13,6 +13,7 @@ const {
   appendMessage,
   assignAgent,
   releaseAgent,
+  closeConversation,
   listSessions,
   summarizeForAgent,
 } = require("../lib/sessions");
@@ -152,6 +153,24 @@ router.post("/sessions/:sessionId/release", async (req, res) => {
   const session = await loadOwnSession(req, res);
   if (!session) return;
   await releaseAgent(session);
+  res.json(summarizeForAgent(session));
+});
+
+// End the conversation outright, unlike release (hands back to the bot,
+// stays open). Available whether the bot is still handling it or an agent
+// has claimed it -- but if a teammate holds it, same guard as reply/claim:
+// you can't end a conversation out from under whoever has it.
+router.post("/sessions/:sessionId/close", async (req, res) => {
+  const session = await loadOwnSession(req, res);
+  if (!session) return;
+  if (session.locked) return res.status(409).json({ error: "This conversation has already ended." });
+  if (session.agent && session.agentUserId && session.agentUserId !== req.user.id) {
+    const holder = await getUser(session.agentUserId);
+    return res
+      .status(409)
+      .json({ error: `${holder ? holder.name : "Another agent"} is handling this conversation` });
+  }
+  await closeConversation(session);
   res.json(summarizeForAgent(session));
 });
 

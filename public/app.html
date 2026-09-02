@@ -702,6 +702,12 @@
     var mine = s.agentUserId === state.me.id;
     var pane = $("pane");
 
+    // Closing is available whenever nobody else holds the conversation --
+    // either it's still with the bot/unclaimed, or this agent has it
+    // themselves. A teammate's active chat is off limits, same rule as
+    // replying into it.
+    var canClose = !s.locked && (!s.agent || mine);
+
     var head =
       '<div class="pane-head">' +
         '<button class="btn btn-ghost btn-sm" id="backBtn" style="display:none">←</button>' +
@@ -712,6 +718,7 @@
         "</div>" +
         statusTag(s) +
         (mine && !s.locked ? '<button class="btn btn-ghost btn-sm" id="releaseBtn">Hand back to bot</button>' : "") +
+        (canClose ? '<button class="btn btn-danger btn-sm" id="closeBtn">End conversation</button>' : "") +
       "</div>";
 
     var body = '<div class="msgs" id="paneMsgs">' + s.messages.map(function (m) {
@@ -745,6 +752,7 @@
 
     if ($("claimBtn")) $("claimBtn").addEventListener("click", claimOpen);
     if ($("releaseBtn")) $("releaseBtn").addEventListener("click", releaseOpen);
+    if ($("closeBtn")) $("closeBtn").addEventListener("click", closeOpen);
     if ($("sendBtn")) $("sendBtn").addEventListener("click", sendReply);
     if ($("backBtn")) {
       $("backBtn").style.display = window.innerWidth <= 880 ? "" : "none";
@@ -783,6 +791,17 @@
     api("/workspace/sessions/" + state.openId + "/release", { method: "POST" })
       .then(function () {
         toast("Handed back to the bot");
+        return api("/workspace/sessions/" + state.openId).then(renderPane);
+      })
+      .then(pollInbox)
+      .catch(function (err) { toast(err.message); });
+  }
+
+  function closeOpen() {
+    if (!confirm("End this conversation? The visitor won't be able to reply anymore.")) return;
+    api("/workspace/sessions/" + state.openId + "/close", { method: "POST" })
+      .then(function () {
+        toast("Conversation closed");
         return api("/workspace/sessions/" + state.openId).then(renderPane);
       })
       .then(pollInbox)

@@ -47,6 +47,10 @@ const AGENT_IDLE_TIMEOUT_MINUTES = Number(process.env.AGENT_IDLE_TIMEOUT_MINUTES
 const AGENT_IDLE_TIMEOUT_MS = Math.max(1, AGENT_IDLE_TIMEOUT_MINUTES) * 60 * 1000;
 const CONVERSATION_ENDED_MESSAGE =
   "This conversation has ended due to inactivity. Start a new conversation any time.";
+// Distinct wording from the idle-timeout message above -- an agent choosing
+// to end things reads very differently to a visitor than "you went quiet".
+const CONVERSATION_CLOSED_MESSAGE =
+  "This conversation has been closed by our team. Start a new conversation any time.";
 
 const SESSION_KEY = "chatbot:session:";
 const CLIENT_SESSIONS_KEY = "chatbot:client-sessions:";
@@ -274,6 +278,22 @@ async function releaseAgent(session) {
   return session;
 }
 
+// An agent ending a conversation outright, as opposed to releaseAgent
+// (hands back to the bot, conversation stays open). Locks it like the idle
+// timeout does -- the visitor can no longer post -- but with wording that
+// makes clear a person chose to end it, not that they were timed out.
+// Idempotent: closing an already-closed conversation is a no-op rather than
+// posting the message twice.
+async function closeConversation(session) {
+  if (session.locked) return session;
+  session.locked = true;
+  session.agent = null;
+  session.agentUserId = null;
+  session.agentRequested = false;
+  await appendMessage(session, { role: "assistant", content: CONVERSATION_CLOSED_MESSAGE });
+  return session;
+}
+
 // ---- listing (agent dashboard) ----
 
 // Agent-facing summary. Carries fields the visitor-facing `summarize()`
@@ -424,6 +444,7 @@ module.exports = {
   messagesSince,
   assignAgent,
   releaseAgent,
+  closeConversation,
   requestAgent,
   listSessions,
   listVisitorConversations,

@@ -364,6 +364,17 @@ can't interleave messages under one name. It's a read-then-write, so a
 genuinely simultaneous claim could still double-assign; closing that needs a
 compare-and-set in Redis.
 
+**Ending a conversation.** An agent can end a conversation outright
+(`POST /api/workspace/sessions/:id/close`), not just hand it back to the
+bot. Unlike release, this locks it the same way the idle timeout does — the
+visitor can no longer reply — but with different wording
+(`CONVERSATION_CLOSED_MESSAGE` in `lib/sessions.js`) so a visitor can tell
+"an agent ended this" apart from "you went quiet too long." Available
+whether the bot is still handling it, it's sitting unclaimed in the queue,
+or this agent holds it themselves; a teammate's active chat is off limits,
+the same rule claim/reply already enforce. The dashboard asks for
+confirmation before calling it, since there's no undo.
+
 ## Setup
 
 ```bash
