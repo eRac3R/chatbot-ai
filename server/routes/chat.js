@@ -86,7 +86,10 @@ router.post("/conversations", async (req, res) => {
   if (!clientConfig) return res.status(404).json({ error: "Unknown client id" });
 
   try {
-    const session = await createConversation(clientId, visitorId);
+    // Stamped once at creation for the agent dashboard's same-IP visitor
+    // grouping (see groupByIp in lib/sessions.js) -- never exposed back to
+    // the widget/visitor.
+    const session = await createConversation(clientId, visitorId, req.ip);
     res.json({ sessionId: session.id, seq: session.seq, agent: session.agent });
   } catch (err) {
     res.status(400).json({ error: err.message });

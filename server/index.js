@@ -11,6 +11,14 @@ const workspaceRoutes = require("./routes/workspace");
 const app = express();
 const PORT = process.env.PORT || 3000;
 
+// Vercel (and any host behind a reverse proxy) terminates the real
+// connection itself and forwards to us with the visitor's real address in
+// X-Forwarded-For -- without this, req.ip on every request is just
+// Vercel's proxy, which breaks the login rate limiter (routes/auth.js,
+// keyed by req.ip) and the same-IP visitor grouping (routes/chat.js).
+// Locally there's no proxy, so req.ip already resolves correctly either way.
+app.set("trust proxy", true);
+
 const allowedOrigins = (process.env.ALLOWED_ORIGINS || "*").split(",").map((s) => s.trim());
 const corsOptions = {
   origin: allowedOrigins.includes("*") ? true : allowedOrigins,

@@ -64,8 +64,15 @@ router.get("/inbox", async (req, res) => {
 router.get("/sessions/:sessionId", async (req, res) => {
   const session = await loadOwnSession(req, res);
   if (!session) return;
+  // Reuse the same grouping listSessions computes for the inbox, so the
+  // "Visitor N (M open)" label a row shows in the queue matches what the
+  // conversation pane shows once opened -- computing it from this one
+  // session in isolation would lose the context of its siblings.
+  const grouped = await listSessions(session.clientId);
+  const withGroup = grouped.find((s) => s.id === session.id);
   res.json({
     ...summarizeForAgent(session),
+    ...(withGroup ? { visitorNumber: withGroup.visitorNumber, sameIpOpenCount: withGroup.sameIpOpenCount } : {}),
     messages: session.messages,
   });
 });

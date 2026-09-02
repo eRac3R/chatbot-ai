@@ -341,6 +341,20 @@ browser has granted permission. The dashboard tracks which request ids it
 has already seen, so the alert fires once per visitor rather than every
 poll, and the backlog already present at login never triggers one.
 
+**Same-IP visitor grouping.** A conversation is stamped with the
+visitor's IP at creation (`req.ip`, via `app.set("trust proxy", true)` in
+`server/index.js` so this resolves correctly behind Vercel's proxy, not
+just locally). The dashboard queue groups conversations sharing an IP
+under one number — "Visitor 3 (2 open)" — instead of what otherwise reads
+as unrelated strangers, since a fresh tab or incognito window gets its own
+random `visitorId` (see Chat history and cross-device continuity above).
+Grouping and numbering (`groupByIp` in `lib/sessions.js`) is a same-*network*
+signal, not a same-*person* claim — a shared office or coffee-shop wifi
+groups genuinely different visitors together too, so treat it as a triage
+hint. The IP itself is agent-facing only: it lives in `summarizeForAgent`,
+never in the visitor-facing `summarize` the widget's own Messages tab
+calls, so it's never sent to the browser that owns it.
+
 **Claiming.** Any agent can take any waiting chat. The claim attaches *that
 user's* name and photo to the conversation, which is what the visitor's
 widget then shows in place of the bot — so an agent's profile is

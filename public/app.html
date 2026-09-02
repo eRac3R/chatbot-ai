@@ -624,6 +624,17 @@
     return '<span class="tag bot">Bot</span>';
   }
 
+  // "Visitor 3 (2 open)" -- conversations sharing an IP get the same
+  // visitor number (server-computed, see groupByIp in lib/sessions.js), so
+  // three tabs from the same person read as one visitor with 3 chats
+  // instead of three unrelated-looking strangers. The count is same-network,
+  // not same-person -- worth remembering on shared wifi.
+  function visitorLabel(s) {
+    var n = s.visitorNumber || "?";
+    var count = s.sameIpOpenCount || 0;
+    return "Visitor " + n + (count > 1 ? " (" + count + " open)" : "");
+  }
+
   function renderConvList(brandNew) {
     var list = filtered();
     var host = $("convList");
@@ -651,7 +662,7 @@
         (s.id === state.openId ? " active" : "") +
         (brandNew.indexOf(s.id) !== -1 ? " justin" : "") + '" data-id="' + s.id + '">' +
         '<div class="conv-top">' +
-          '<span class="conv-title">Visitor ' + esc(String(s.id).slice(0, 6)) + "</span>" +
+          '<span class="conv-title">' + esc(visitorLabel(s)) + "</span>" +
           statusTag(s) +
           '<span class="conv-time">' + ago(s.waiting ? (s.agentRequestedAt || s.updatedAt) : s.updatedAt) + "</span>" +
         "</div>" +
@@ -696,7 +707,7 @@
         '<button class="btn btn-ghost btn-sm" id="backBtn" style="display:none">←</button>' +
         '<div class="avatar">' + esc(String(s.id).slice(0, 2).toUpperCase()) + "</div>" +
         '<div style="flex:1;min-width:0">' +
-          '<div class="who">Visitor ' + esc(String(s.id).slice(0, 6)) + "</div>" +
+          '<div class="who">' + esc(visitorLabel(s)) + "</div>" +
           '<div class="sub">' + s.messageCount + " messages · last activity " + ago(s.updatedAt) + " ago</div>" +
         "</div>" +
         statusTag(s) +

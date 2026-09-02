@@ -62,16 +62,25 @@ function isValidVisitorId(visitorId) {
   return typeof visitorId === "string" && /^[a-zA-Z0-9_-]{8,160}$/.test(visitorId);
 }
 
-function newSession(sessionId, clientId, visitorId) {
+function newSession(sessionId, clientId, visitorId, ip) {
   return {
     id: sessionId,
     clientId: clientId,
     visitorId: visitorId || null,
+    // The visitor's IP at the moment this conversation started -- used only
+    // to group same-IP conversations together in the agent dashboard (see
+    // summarizeForAgent/groupByIp). Never sent to the public/widget-facing
+    // API (see `summarize`, distinct from `summarizeForAgent`).
+    ip: ip || null,
     seq: 0,
     agent: null,
     agentRequested: false,
     locked: false,
     messages: [],
+    // Fixed at creation, unlike updatedAt -- this is what same-IP grouping
+    // sorts by, so a group's position in the list can't shift just because
+    // one of its conversations got a new message.
+    createdAt: Date.now(),
     updatedAt: Date.now(),
   };
 }
@@ -166,11 +175,11 @@ async function getOrCreateSession(sessionId, clientId) {
 // Distinct from getOrCreateSession: that resumes a specific known
 // conversation, this always mints a fresh one and registers it under the
 // visitor so it shows up in their Messages tab.
-async function createConversation(clientId, visitorId) {
+async function createConversation(clientId, visitorId, ip) {
   if (!isValidVisitorId(visitorId)) {
     throw new Error("A valid visitorId is required to start a conversation");
   }
-  const session = newSession(crypto.randomUUID(), clientId, visitorId);
+  const session = newSession(crypto.randomUUID(), clientId, visitorId, ip);
   await saveSession(session);
   return session;
 }
@@ -297,7 +306,51 @@ function summarizeForAgent(session) {
       ? { role: last.role, content: last.content.slice(0, 120), sender: last.sender || null }
       : null,
     lastVisitorMessage: lastFromVisitor ? lastFromVisitor.content.slice(0, 120) : null,
+    ip: session.ip || null,
+    createdAt: session.createdAt || session.updatedAt,
   };
+}
+
+// Same visitor opening several tabs/incognito windows gets a different
+// visitorId each time (see identity.js), so the dashboard queue used to
+// show what looked like N unrelated strangers. This folds same-IP
+// conversations under one shared, human-friendly number instead --
+// "Visitor 3 (2 open)" rather than three unrelated-looking rows.
+//
+// Deliberately a same-network signal, not a same-person one: a shared
+// office or coffee-shop wifi groups distinct visitors together too. It's a
+// triage hint for agents, not an identity claim.
+//
+// Numbering is derived from each group's earliest `createdAt`, not from
+// current sort order (listSessions sorts by most-recently-active) -- so a
+// group's number doesn't change just because a *different* group got a new
+// message. It's still only stable across the currently-listed sessions
+// (capped at MAX_LISTED_SESSIONS, and older ones age out with SESSION_TTL),
+// not a permanent id.
+function groupByIp(summaries) {
+  const groupKey = (s) => s.ip || "solo:" + s.id; // no IP on record -> its own group of one
+  const earliestByKey = new Map();
+  const countByKey = new Map(); // open (non-locked) conversations only
+  for (const s of summaries) {
+    const key = groupKey(s);
+    const current = earliestByKey.get(key);
+    if (current === undefined || s.createdAt < current) earliestByKey.set(key, s.createdAt);
+    if (!s.locked) countByKey.set(key, (countByKey.get(key) || 0) + 1);
+  }
+
+  const orderedKeys = Array.from(earliestByKey.keys()).sort(
+    (a, b) => earliestByKey.get(a) - earliestByKey.get(b)
+  );
+  const numberByKey = new Map(orderedKeys.map((key, i) => [key, i + 1]));
+
+  return summaries.map((s) => {
+    const key = groupKey(s);
+    return {
+      ...s,
+      visitorNumber: numberByKey.get(key),
+      sameIpOpenCount: countByKey.get(key) || 0,
+    };
+  });
 }
 
 async function listSessions(clientId) {
@@ -315,7 +368,7 @@ async function listSessions(clientId) {
   ids = ids.slice(0, MAX_LISTED_SESSIONS);
 
   const sessions = await Promise.all(ids.map((id) => getSession(id)));
-  return sessions.filter(Boolean).map(summarizeForAgent);
+  return groupByIp(sessions.filter(Boolean).map(summarizeForAgent));
 }
 
 function summarize(session) {
@@ -375,4 +428,5 @@ module.exports = {
   listSessions,
   listVisitorConversations,
   summarizeForAgent,
+  groupByIp,
 };
