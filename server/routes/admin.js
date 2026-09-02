@@ -1,6 +1,12 @@
 const express = require("express");
 const multer = require("multer");
-const { getClient, listClients, upsertClient, deleteClient } = require("../lib/clients");
+const {
+  getClient,
+  listClients,
+  listClientSummaries,
+  upsertClient,
+  deleteClient,
+} = require("../lib/clients");
 const { crawlWebsite } = require("../lib/crawler");
 const { extractPdfText } = require("../lib/pdfExtractor");
 const {
@@ -42,6 +48,26 @@ router.use(requirePlatformAdmin);
 
 router.get("/clients", async (req, res) => {
   res.json({ clients: await listClients() });
+});
+
+// Everything the "all workspaces" view in admin.html needs in one round
+// trip: per-business summary (brand, FAQ count, timestamps) plus how many
+// people can sign in to each, broken down by role. Distinct from the bare
+// id list above, which older tooling may still depend on.
+router.get("/workspaces", async (req, res) => {
+  const summaries = await listClientSummaries();
+  const workspaces = await Promise.all(
+    summaries.map(async (client) => {
+      const users = await listUsers(client.id);
+      return {
+        ...client,
+        userCount: users.length,
+        ownerCount: users.filter((u) => u.role === "owner").length,
+        agentCount: users.filter((u) => u.role === "agent").length,
+      };
+    })
+  );
+  res.json({ workspaces });
 });
 
 router.get("/clients/:id", async (req, res) => {

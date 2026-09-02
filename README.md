@@ -40,9 +40,19 @@ any website; each business gets its own knowledge base (product info + FAQs).
   build step. Reads `data-client-id` off its own `<script>` tag and infers the
   API base URL from where it was loaded — so the exact same file works for
   every customer with zero configuration.
-- `public/admin.html` — a simple form to create/update a client's knowledge
-  base and get the embed snippet to hand to the business. Besides the
-  knowledge base it also sets the widget's presentation:
+- `public/admin.html` — the platform-owner console, gated by `ADMIN_KEY`.
+  Above the create/edit form is **Your workspaces**: every business on this
+  server (`GET /api/admin/workspaces`, brand/FAQ-count/team-size in one
+  round trip), each expandable in place to see its team, add or remove a
+  login, or delete the workspace outright — this is the UI for the "two
+  platform-owner calls" described under Onboarding a business below, so you
+  no longer need curl for it. Clicking a workspace's Edit button prefills
+  the form below (locking the Client ID field, since re-typing it would
+  silently create a second workspace instead of editing this one) rather
+  than duplicating a separate edit view. The form itself creates/updates a
+  client's knowledge base and gets the embed snippet to hand to the
+  business. Besides the knowledge base it also sets the widget's
+  presentation:
   - **Bot profile picture** (`avatarUrl`) — shown in the chat header and beside
     every bot message. Falls back to the bot's initials when blank or if the
     image fails to load. Only `http(s)` URLs are accepted (`clients.js`
@@ -319,7 +329,9 @@ before it expires (7 days), so changing a password doesn't sign out other
 devices.
 
 **Onboarding a business** is two platform-owner calls — create the client,
-then mint its first owner login:
+then mint its first owner login. `admin.html`'s workspaces list is the UI
+for both (create via the form, add the owner login by expanding the new
+row), or drive it directly:
 
 ```bash
 curl -X POST http://localhost:3000/api/admin/clients   -H "x-admin-key: $ADMIN_KEY" -H "Content-Type: application/json"   -d '{"id":"joes-pizza","botName":"Joe","businessInfo":"..."}'
@@ -328,6 +340,10 @@ curl -X POST http://localhost:3000/api/admin/clients/joes-pizza/users   -H "x-ad
 ```
 
 From there the owner signs in at `/app.html` and invites their own staff.
+Deleting a workspace (from the list, or `DELETE /api/admin/clients/:id`)
+cascades to every login under it — a user record pointing at a deleted
+client would otherwise still authenticate, landing in a dashboard for a
+workspace that no longer exists.
 
 **The inbox.** Polls `GET /api/workspace/inbox` every 4 seconds (again: no
 sockets on serverless) and splits conversations into Waiting / Mine / All.

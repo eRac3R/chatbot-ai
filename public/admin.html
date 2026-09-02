@@ -27,16 +27,68 @@
   #status { margin-top: 10px; font-size: 13px; }
   .error { color: #c0392b; }
   .success { color: #2e7d32; }
+
+  /* ---- workspaces list ---- */
+  #workspaces { margin-top: 28px; }
+  #workspaces h2 { font-size: 17px; margin-bottom: 2px; }
+  #workspaces > p { margin-top: 4px; font-size: 13px; color: #888; }
+  .ws-toolbar { display: flex; align-items: center; gap: 10px; margin: 10px 0; }
+  .ws-toolbar button { padding: 6px 12px; font-size: 13px; border-radius: 6px; border: 1px solid #ccc; background: #fff; }
+  #wsNewBtn { background: #6366f1; color: #fff; border-color: #6366f1; }
+  #wsStatus { font-size: 13px; color: #888; }
+  .ws-row { border: 1px solid #ddd; border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
+  .ws-row-main { display: flex; align-items: center; gap: 12px; padding: 12px 14px; cursor: pointer; }
+  .ws-swatch { width: 30px; height: 30px; border-radius: 8px; flex-shrink: 0; border: 1px solid rgba(0,0,0,.08); }
+  .ws-name { font-weight: 600; font-size: 14px; }
+  .ws-id { font-size: 12px; color: #888; font-family: monospace; }
+  .ws-meta { flex: 1; min-width: 0; }
+  .ws-stats { display: flex; gap: 8px; flex-shrink: 0; }
+  .ws-pill { font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 10px; background: #f0f0f6; color: #555; white-space: nowrap; }
+  .ws-caret { transition: transform .15s ease; flex-shrink: 0; color: #999; }
+  .ws-row.open .ws-caret { transform: rotate(90deg); }
+  .ws-detail { display: none; border-top: 1px solid #eee; padding: 14px; background: #fafafa; }
+  .ws-row.open .ws-detail { display: block; }
+  .ws-detail h4 { margin: 0 0 8px; font-size: 13px; }
+  .ws-user-row { display: flex; align-items: center; gap: 8px; padding: 6px 0; font-size: 13px; border-bottom: 1px solid #eee; }
+  .ws-user-row:last-of-type { border-bottom: none; }
+  .ws-user-role { font-size: 11px; padding: 2px 7px; border-radius: 9px; background: #e8e8f0; }
+  .ws-user-row button { margin-left: auto; font-size: 12px; padding: 3px 8px; border-radius: 5px; border: 1px solid #e0a0a0; background: #fff; color: #c0392b; }
+  .ws-add-user { display: flex; gap: 6px; margin-top: 10px; flex-wrap: wrap; }
+  .ws-add-user input, .ws-add-user select { padding: 6px 8px; font-size: 13px; border: 1px solid #ccc; border-radius: 5px; }
+  .ws-add-user input[type=text], .ws-add-user input[type=email] { flex: 1; min-width: 120px; }
+  .ws-add-user button { padding: 6px 12px; font-size: 13px; border-radius: 5px; border: none; background: #6366f1; color: #fff; }
+  .ws-row-actions { display: flex; gap: 8px; margin-top: 12px; }
+  .ws-row-actions button { font-size: 12px; padding: 5px 10px; border-radius: 5px; border: 1px solid #ccc; background: #fff; }
+  .ws-row-actions .ws-delete { border-color: #e0a0a0; color: #c0392b; }
+  #wsEditingNotice { display: none; margin: 10px 0; padding: 10px 12px; background: #eef2ff; border-radius: 6px; font-size: 13px; }
+  #wsEditingNotice button { margin-left: 8px; font-size: 12px; }
 </style>
 </head>
 <body>
-  <h1>Set up your chat widget</h1>
-  <p>Fill this in once, then paste the embed snippet into your website. No code changes needed after that.</p>
+  <h1>Chatbot Admin</h1>
+  <p>Onboard a business, hand them the embed snippet, and manage who can sign into their Agent Desk.</p>
+
+  <label for="adminKey">Admin key <small>(from the server's .env — keeps this page private to you)</small></label>
+  <input type="password" id="adminKey" required />
+
+  <section id="workspaces">
+    <h2>Your workspaces</h2>
+    <p>Every business using this server. Click one to see its team or delete it; use Edit to change its bot, FAQs, or branding.</p>
+    <div class="ws-toolbar">
+      <button type="button" id="wsRefresh">Refresh</button>
+      <button type="button" id="wsNewBtn">+ New workspace</button>
+      <span id="wsStatus"></span>
+    </div>
+    <div id="wsList"></div>
+  </section>
+
+  <div id="wsEditingNotice">
+    Editing <strong id="wsEditingName"></strong> — the Client ID below is locked so you don't accidentally create a
+    second workspace.
+    <button type="button" id="wsCancelEdit">Cancel, start a new workspace instead</button>
+  </div>
 
   <form id="clientForm">
-    <label for="adminKey">Admin key <small>(from the server's .env — keeps this form private to you)</small></label>
-    <input type="password" id="adminKey" required />
-
     <label for="clientId">Client ID <small>(letters/numbers/-/_, becomes part of your widget URL)</small></label>
     <input type="text" id="clientId" placeholder="acme-co" pattern="[a-zA-Z0-9_-]{3,64}" required />
 
@@ -113,6 +165,214 @@
   if (/^(localhost|127\.0\.0\.1)$/.test(location.hostname)) {
     document.getElementById("adminKey").value = "1234";
   }
+
+  // ---- workspaces list ----
+
+  var wsList = document.getElementById("wsList");
+  var wsStatus = document.getElementById("wsStatus");
+  var editingId = null; // non-null while the form below is editing an existing workspace
+
+  function esc(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c];
+    });
+  }
+
+  function adminFetch(path, options) {
+    options = options || {};
+    var headers = Object.assign({ "x-admin-key": document.getElementById("adminKey").value }, options.headers || {});
+    return fetch(path, Object.assign({}, options, { headers: headers }))
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, status: r.status, data: d }; }); });
+  }
+
+  function loadWorkspaces() {
+    var adminKey = document.getElementById("adminKey").value;
+    if (!adminKey) { wsStatus.textContent = "Enter your admin key above first."; return; }
+    wsStatus.textContent = "Loading…";
+    adminFetch("/api/admin/workspaces").then(function (res) {
+      if (!res.ok) { wsStatus.textContent = res.data.error || "Failed to load"; wsList.innerHTML = ""; return; }
+      wsStatus.textContent = res.data.workspaces.length + " workspace(s)";
+      renderWorkspaces(res.data.workspaces);
+    }).catch(function () { wsStatus.textContent = "Couldn't reach the server."; });
+  }
+
+  function renderWorkspaces(workspaces) {
+    if (!workspaces.length) {
+      wsList.innerHTML = "<p style=\"color:#888;font-size:13px;\">No workspaces yet — fill in the form below to create your first one.</p>";
+      return;
+    }
+    wsList.innerHTML = "";
+    workspaces.forEach(function (w) { wsList.appendChild(buildWorkspaceRow(w)); });
+  }
+
+  function buildWorkspaceRow(w) {
+    var row = document.createElement("div");
+    row.className = "ws-row";
+    row.dataset.id = w.id;
+
+    var main = document.createElement("div");
+    main.className = "ws-row-main";
+    main.innerHTML =
+      '<div class="ws-swatch" style="background:' + esc(w.brandColor || "#6366f1") + '"></div>' +
+      '<div class="ws-meta"><div class="ws-name">' + esc(w.botName || w.id) + '</div>' +
+      '<div class="ws-id">' + esc(w.id) + '</div></div>' +
+      '<div class="ws-stats">' +
+        '<span class="ws-pill">' + w.faqCount + ' FAQ' + (w.faqCount === 1 ? "" : "s") + '</span>' +
+        '<span class="ws-pill ws-pill-users">' + w.userCount + ' team member' + (w.userCount === 1 ? "" : "s") + '</span>' +
+      '</div>' +
+      '<svg class="ws-caret" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>';
+    main.addEventListener("click", function () {
+      var wasOpen = row.classList.contains("open");
+      row.classList.toggle("open", !wasOpen);
+      if (!wasOpen) loadTeam(w.id, row.querySelector(".ws-detail"));
+    });
+
+    var detail = document.createElement("div");
+    detail.className = "ws-detail";
+    detail.innerHTML =
+      '<h4>Team</h4><div class="ws-users">Loading…</div>' +
+      '<div class="ws-add-user">' +
+        '<input type="text" class="ws-new-name" placeholder="Name" />' +
+        '<input type="email" class="ws-new-email" placeholder="Email" />' +
+        '<input type="text" class="ws-new-pass" placeholder="Password (8+ chars)" />' +
+        '<select class="ws-new-role"><option value="agent">Agent</option><option value="owner">Owner</option></select>' +
+        '<button type="button" class="ws-add-user-btn">Add teammate</button>' +
+      '</div>' +
+      '<div class="ws-row-actions">' +
+        '<button type="button" class="ws-edit">Edit workspace</button>' +
+        '<button type="button" class="ws-delete">Delete workspace</button>' +
+      '</div>';
+
+    detail.querySelector(".ws-add-user-btn").addEventListener("click", function (e) {
+      e.stopPropagation();
+      var name = detail.querySelector(".ws-new-name").value.trim();
+      var email = detail.querySelector(".ws-new-email").value.trim();
+      var password = detail.querySelector(".ws-new-pass").value;
+      var role = detail.querySelector(".ws-new-role").value;
+      adminFetch("/api/admin/clients/" + encodeURIComponent(w.id) + "/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: name, email: email, password: password, role: role }),
+      }).then(function (res) {
+        if (!res.ok) { alert(res.data.error || "Couldn't add teammate"); return; }
+        detail.querySelector(".ws-new-name").value = "";
+        detail.querySelector(".ws-new-email").value = "";
+        detail.querySelector(".ws-new-pass").value = "";
+        // Refreshes this row's team list and member-count pill in place --
+        // NOT a full loadWorkspaces(), which rebuilds every row from
+        // scratch and would collapse the very panel you're looking at
+        // right after adding someone to it.
+        loadTeam(w.id, detail);
+      });
+    });
+
+    detail.querySelector(".ws-edit").addEventListener("click", function (e) {
+      e.stopPropagation();
+      editWorkspace(w.id);
+    });
+
+    detail.querySelector(".ws-delete").addEventListener("click", function (e) {
+      e.stopPropagation();
+      if (!confirm("Delete \"" + w.botName + "\" (" + w.id + ")? This removes its knowledge base, all logins, and every conversation. This can't be undone.")) return;
+      adminFetch("/api/admin/clients/" + encodeURIComponent(w.id), { method: "DELETE" }).then(function (res) {
+        if (!res.ok) { alert(res.data.error || "Couldn't delete"); return; }
+        loadWorkspaces();
+      });
+    });
+
+    row.appendChild(main);
+    row.appendChild(detail);
+    return row;
+  }
+
+  function loadTeam(clientId, detailEl) {
+    var usersBox = detailEl.querySelector(".ws-users");
+    var pill = detailEl.closest(".ws-row").querySelector(".ws-pill-users");
+    usersBox.textContent = "Loading…";
+    adminFetch("/api/admin/clients/" + encodeURIComponent(clientId) + "/users").then(function (res) {
+      if (!res.ok) { usersBox.textContent = res.data.error || "Failed to load team"; return; }
+      var users = res.data.users;
+      pill.textContent = users.length + " team member" + (users.length === 1 ? "" : "s");
+      if (!users.length) { usersBox.innerHTML = "<p style=\"color:#888;\">No logins yet.</p>"; return; }
+      usersBox.innerHTML = "";
+      users.forEach(function (u) {
+        var row = document.createElement("div");
+        row.className = "ws-user-row";
+        row.innerHTML =
+          "<span>" + esc(u.name) + "</span>" +
+          "<span style=\"color:#888\">" + esc(u.email) + "</span>" +
+          "<span class=\"ws-user-role\">" + esc(u.role) + "</span>";
+        var del = document.createElement("button");
+        del.type = "button";
+        del.textContent = "Remove";
+        del.addEventListener("click", function (e) {
+          e.stopPropagation();
+          if (!confirm("Remove " + u.name + "'s access?")) return;
+          adminFetch("/api/admin/users/" + u.id, { method: "DELETE" }).then(function (res2) {
+            if (!res2.ok) { alert(res2.data.error || "Couldn't remove"); return; }
+            loadTeam(clientId, detailEl);
+          });
+        });
+        row.appendChild(del);
+        usersBox.appendChild(row);
+      });
+    });
+  }
+
+  function editWorkspace(clientId) {
+    adminFetch("/api/admin/clients/" + encodeURIComponent(clientId)).then(function (res) {
+      if (!res.ok) { alert(res.data.error || "Couldn't load workspace"); return; }
+      fillFormFromClient(res.data);
+      window.scrollTo({ top: document.getElementById("clientForm").offsetTop - 20, behavior: "smooth" });
+    });
+  }
+
+  function fillFormFromClient(c) {
+    editingId = c.id;
+    document.getElementById("clientId").value = c.id;
+    document.getElementById("clientId").readOnly = true;
+    document.getElementById("botName").value = c.botName || "";
+    document.getElementById("welcomeMessage").value = c.welcomeMessage || "";
+    document.getElementById("brandColor").value = c.brandColor || "#6366f1";
+    document.getElementById("avatarUrl").value = c.avatarUrl || "";
+    document.getElementById("tone").value = c.tone || "";
+    document.getElementById("businessInfo").value = c.businessInfo || "";
+    var qr = c.quickReplies || [];
+    ["quickReply1", "quickReply2", "quickReply3", "quickReply4"].forEach(function (id, i) {
+      document.getElementById(id).value = qr[i] || "";
+    });
+    faqList.innerHTML = "";
+    (c.faqs && c.faqs.length ? c.faqs : [{ question: "", answer: "" }]).forEach(function (f) {
+      addFaqRow(f.question, f.answer);
+    });
+    document.getElementById("wsEditingName").textContent = c.botName + " (" + c.id + ")";
+    document.getElementById("wsEditingNotice").style.display = "block";
+    document.getElementById("submit").textContent = "Save changes";
+    document.getElementById("result").style.display = "none";
+  }
+
+  function resetToNewWorkspace() {
+    editingId = null;
+    document.getElementById("clientForm").reset();
+    document.getElementById("clientId").readOnly = false;
+    document.getElementById("brandColor").value = "#6366f1";
+    document.getElementById("tone").value = "friendly and concise";
+    faqList.innerHTML = "";
+    addFaqRow();
+    document.getElementById("wsEditingNotice").style.display = "none";
+    document.getElementById("submit").textContent = "Save & get embed code";
+    document.getElementById("result").style.display = "none";
+  }
+
+  document.getElementById("wsRefresh").addEventListener("click", loadWorkspaces);
+  document.getElementById("wsNewBtn").addEventListener("click", function () {
+    resetToNewWorkspace();
+    window.scrollTo({ top: document.getElementById("clientForm").offsetTop - 20, behavior: "smooth" });
+  });
+  document.getElementById("wsCancelEdit").addEventListener("click", resetToNewWorkspace);
+  document.getElementById("adminKey").addEventListener("change", loadWorkspaces);
+
+  if (document.getElementById("adminKey").value) loadWorkspaces();
 
   var faqList = document.getElementById("faqList");
 
@@ -198,6 +458,14 @@
   document.getElementById("clientForm").addEventListener("submit", function (e) {
     e.preventDefault();
     var status = document.getElementById("status");
+    // The admin key input moved outside <form> so the workspaces list above
+    // could use it too -- that means the browser's native "required" check
+    // no longer covers it on submit, so it needs its own check here.
+    if (!document.getElementById("adminKey").value) {
+      status.textContent = "Enter your admin key at the top of the page first.";
+      status.className = "error";
+      return;
+    }
     status.textContent = "Saving...";
     status.className = "";
 
@@ -237,12 +505,16 @@
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {
         if (!res.ok) throw new Error(res.data.error || "Save failed");
-        status.textContent = "Saved!";
+        var wasNew = !editingId;
+        status.textContent = wasNew
+          ? "Saved! Expand it in the list above to add a login for this business."
+          : "Saved!";
         status.className = "success";
         var snippet =
           '<script src="' + window.location.origin + '/widget.js" data-client-id="' + payload.id + '"><' + '/script>';
         document.getElementById("snippet").textContent = snippet;
         document.getElementById("result").style.display = "block";
+        loadWorkspaces();
       })
       .catch(function (err) {
         status.textContent = err.message;

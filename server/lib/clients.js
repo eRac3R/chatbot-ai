@@ -125,8 +125,20 @@ async function getClient(clientId) {
   // signature checks would silently never pass for them. Mint one on first
   // read and persist it, so this is a one-time backfill rather than a
   // permanently broken feature for older clients.
+  //
+  // Same idea for createdAt (added for the workspaces list): clients from
+  // before that field existed would otherwise show a permanent "null"
+  // rather than a real, if approximate, date.
+  let needsSave = false;
   if (!client.identitySecret) {
     client.identitySecret = crypto.randomBytes(32).toString("hex");
+    needsSave = true;
+  }
+  if (!client.createdAt) {
+    client.createdAt = client.updatedAt || new Date().toISOString();
+    needsSave = true;
+  }
+  if (needsSave) {
     if (hasRedis) {
       await redisUpsertClient(client);
     } else {
@@ -159,6 +171,23 @@ async function listClients() {
   return hasRedis ? redisListClients() : fileListClients();
 }
 
+// What the platform-owner "all workspaces" view needs: enough to
+// distinguish businesses at a glance without shipping full businessInfo
+// dumps or the identitySecret over the wire. listClients() alone only
+// returns bare ids.
+async function listClientSummaries() {
+  const ids = await listClients();
+  const clients = await Promise.all(ids.map((id) => getClient(id)));
+  return clients.filter(Boolean).map((c) => ({
+    id: c.id,
+    botName: c.botName,
+    brandColor: c.brandColor,
+    faqCount: Array.isArray(c.faqs) ? c.faqs.length : 0,
+    createdAt: c.createdAt || null,
+    updatedAt: c.updatedAt || null,
+  }));
+}
+
 async function upsertClient(config) {
   if (!isValidClientId(config.id)) {
     throw new Error("clientId must be 3-64 chars, letters/numbers/-/_ only");
@@ -186,6 +215,7 @@ async function upsertClient(config) {
     // hand over their cross-device chat history. Generated once, never
     // exposed through the public widget config. See lib/identity.js.
     identitySecret: existing.identitySecret || crypto.randomBytes(32).toString("hex"),
+    createdAt: existing.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
   if (hasRedis) {
@@ -206,6 +236,7 @@ module.exports = {
   getClient,
   getPublicClient,
   listClients,
+  listClientSummaries,
   upsertClient,
   deleteClient,
 };
