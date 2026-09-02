@@ -1,5 +1,8 @@
 const express = require("express");
+const multer = require("multer");
 const { getClient, upsertClient } = require("../lib/clients");
+const { crawlWebsite } = require("../lib/crawler");
+const { extractPdfText } = require("../lib/pdfExtractor");
 const {
   listUsers,
   createUser,
@@ -20,6 +23,17 @@ const {
 const { requireAuth, requireOwner } = require("../lib/auth");
 
 const router = express.Router();
+
+const uploadPdf = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 15 * 1024 * 1024 }, // 15MB
+  fileFilter: (req, file, cb) => {
+    if (file.mimetype !== "application/pdf") {
+      return cb(new Error("Only PDF files are accepted"));
+    }
+    cb(null, true);
+  },
+});
 
 // The agent CRM's API. Everything here is behind a workspace login, and --
 // the important part -- no route reads a clientId from the request. It
@@ -286,6 +300,40 @@ router.post("/client", requireOwner, async (req, res) => {
   } catch (err) {
     res.status(400).json({ error: err.message });
   }
+});
+
+// Workspace-scoped mirrors of the platform-admin /crawl and /extract-pdf
+// (routes/admin.js) -- same underlying lib functions, but reachable with a
+// business's own login instead of ADMIN_KEY, so an owner can pull in their
+// own site/PDF content without us doing it for them. Like the admin
+// versions, these only return extracted text for review; they never write
+// to the client config by themselves.
+router.post("/client/crawl", requireOwner, async (req, res) => {
+  const { url } = req.body || {};
+  if (typeof url !== "string" || !url.trim()) {
+    return res.status(400).json({ error: "url is required" });
+  }
+  try {
+    const result = await crawlWebsite(url.trim());
+    res.json(result);
+  } catch (err) {
+    res.status(400).json({ error: err.message });
+  }
+});
+
+router.post("/client/extract-pdf", requireOwner, (req, res) => {
+  uploadPdf.single("pdf")(req, res, async (err) => {
+    if (err) return res.status(400).json({ error: err.message });
+    if (!req.file) {
+      return res.status(400).json({ error: "No PDF file uploaded (field name must be 'pdf')" });
+    }
+    try {
+      const businessInfo = await extractPdfText(req.file.buffer);
+      res.json({ businessInfo, filename: req.file.originalname });
+    } catch (e) {
+      res.status(400).json({ error: e.message });
+    }
+  });
 });
 
 module.exports = router;

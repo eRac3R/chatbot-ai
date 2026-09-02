@@ -23,9 +23,10 @@ function isValidClientId(clientId) {
   return typeof clientId === "string" && /^[a-zA-Z0-9_-]{3,64}$/.test(clientId);
 }
 
-// The widget renders this straight into an <img src>, so only allow real
-// http(s) URLs -- never javascript:/data: URIs.
-function sanitizeAvatarUrl(url) {
+// Shared by avatarUrl (rendered straight into an <img src>) and website
+// (rendered into an <a href>) -- both need the same rule: only real http(s)
+// URLs, never javascript:/data: URIs.
+function sanitizeUrl(url) {
   if (typeof url !== "string" || !url.trim()) return "";
   try {
     const parsed = new URL(url.trim());
@@ -182,6 +183,7 @@ async function listClientSummaries() {
     id: c.id,
     botName: c.botName,
     brandColor: c.brandColor,
+    website: c.website || "",
     faqCount: Array.isArray(c.faqs) ? c.faqs.length : 0,
     createdAt: c.createdAt || null,
     updatedAt: c.updatedAt || null,
@@ -204,8 +206,14 @@ async function upsertClient(config) {
     tone: config.tone ?? existing.tone ?? "friendly and concise",
     avatarUrl:
       config.avatarUrl !== undefined
-        ? sanitizeAvatarUrl(config.avatarUrl)
+        ? sanitizeUrl(config.avatarUrl)
         : existing.avatarUrl ?? "",
+    // The business's own site, shown as a clickable link in the dashboards
+    // (never rendered into the widget itself). Same http(s)-only rule as
+    // avatarUrl -- it ends up in an <a href>, so javascript:/data: URIs need
+    // the same rejection.
+    website:
+      config.website !== undefined ? sanitizeUrl(config.website) : existing.website ?? "",
     quickReplies:
       config.quickReplies !== undefined
         ? sanitizeQuickReplies(config.quickReplies)

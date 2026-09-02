@@ -41,6 +41,12 @@ app.use("/api/admin", cors(corsOptions), adminRoutes);
 app.use("/api/auth", authRoutes);
 app.use("/api/workspace", workspaceRoutes);
 
+// The bare domain has no page of its own -- nobody in the actual product
+// flow visits it (customers only ever load widget.js embedded on their own
+// site; you go straight to /app.html), so send anyone who lands here
+// straight to the Agent Desk instead of a 404.
+app.get("/", (req, res) => res.redirect("/app.html"));
+
 // The embeddable widget script itself, and a small onboarding/demo UI.
 app.use(express.static(path.join(__dirname, "..", "widget")));
 app.use(express.static(path.join(__dirname, "..", "public")));

@@ -65,6 +65,10 @@ any website; each business gets its own knowledge base (product info + FAQs).
     every bot message. Falls back to the bot's initials when blank or if the
     image fails to load. Only `http(s)` URLs are accepted (`clients.js`
     strips anything else, since the widget renders it into an `<img src>`).
+  - **Website** (`website`) — the business's own site, shown as a clickable
+    link (not rendered into the widget itself) both in the platform-admin
+    workspaces list and in the business's own Settings tab. Same `http(s)`-
+    only sanitization as the bot picture, via the same `sanitizeUrl` helper.
   - **Personality** (`tone`) — free-form, as long as you like: voice, quirks,
     phrases to use or avoid, how to handle a frustrated visitor. It shapes
     *how* the bot speaks; the factual "only use the business info" rules
@@ -86,8 +90,14 @@ any website; each business gets its own knowledge base (product info + FAQs).
   `server/lib/sessions.js` transparently switch to Redis instead, since
   serverless hosts don't offer a persistent disk or long-lived memory.
 
-Knowledge base entry has three paths feeding one `businessInfo` field, in
-the platform-admin panel described above (`/app.html`, "Admin" button):
+Knowledge base entry has three paths feeding one `businessInfo` field,
+present identically in both the platform-admin panel (`/app.html`, "Admin"
+button) and a business owner's own Settings tab — the latter hits
+workspace-scoped mirror routes (`POST /api/workspace/client/crawl` and
+`/client/extract-pdf` in `routes/workspace.js`, gated by a workspace login
+rather than `ADMIN_KEY`) that call the exact same `lib/crawler.js` and
+`lib/pdfExtractor.js` functions, so owners can pull in their own content
+without asking us to do it:
 - **Manual** — paste product info and add FAQs directly.
 - **Import from website** — enter the business's URL and click "Fetch
   content"; `server/lib/crawler.js` fetches the page plus a few same-domain
@@ -441,6 +451,20 @@ can't interleave messages under one name. It's a read-then-write, so a
 genuinely simultaneous claim could still double-assign; closing that needs a
 compare-and-set in Redis.
 
+**That photo is set by uploading a file, not pasting a URL.** My profile's
+photo field is a file picker (`accept="image/png,image/jpeg,image/webp"`),
+resized and center-cropped to a square client-side via `<canvas>`
+(`MAX_AVATAR_DIMENSION` 160px, JPEG quality 0.82) and submitted as a
+`data:image/jpeg;base64,...` string through the same `POST /api/auth/me` —
+there's no separate upload endpoint or file storage, since the whole thing
+fits comfortably as one field on the user record. `sanitizeAvatar` in
+`lib/users.js` accepts either that data URI shape or an ordinary `http(s)`
+link (so the old URL-based value on existing accounts keeps working), and
+explicitly rejects `data:image/svg+xml` — SVG can carry embedded scripts,
+raster formats can't. Capped at `MAX_AVATAR_DATA_URI_LENGTH` (300KB of
+base64) server-side, checked client-side first too so an oversized result
+surfaces a clear message instead of a failed request.
+
 **Ending a conversation.** An agent can end a conversation outright
 (`POST /api/workspace/sessions/:id/close`), not just hand it back to the
 bot. Unlike release (or the automatic pause above), this permanently locks
@@ -476,6 +500,9 @@ Then open:
 - http://localhost:3000/app.html — click "Admin" on the login screen to
   onboard a new business (paste their product info, get their embed
   snippet), or sign in with a workspace login to try the Agent Desk itself
+- http://localhost:3000/ (the bare domain) redirects straight to `/app.html`
+  — nobody in the actual product flow visits root directly, so this exists
+  purely so the domain isn't a dead 404 if someone lands on it
 
 ## Embedding on a real website
 

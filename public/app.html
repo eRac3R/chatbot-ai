@@ -233,6 +233,8 @@
   .ws-meta{flex:1;min-width:0}
   .ws-name{font-weight:650;font-size:13.5px}
   .ws-id{font-size:11.5px;color:var(--faint);font-family:monospace;margin-top:1px}
+  .ws-website{display:inline-block;font-size:11.5px;color:#8f7bff;text-decoration:none;margin-top:3px}
+  .ws-website:hover{text-decoration:underline}
   .ws-stats{display:flex;gap:7px;flex-shrink:0}
   .ws-pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:10px;background:var(--surface-2);color:var(--muted);white-space:nowrap}
   .ws-caret{transition:transform .15s ease;color:var(--faint);flex-shrink:0}
@@ -409,12 +411,29 @@
             <div class="field"><label>Brand colour</label><input type="color" id="cBrandColor" style="height:42px;padding:4px" /></div>
           </div>
           <div class="field"><label>Welcome message</label><input type="text" id="cWelcome" /></div>
+          <div class="field"><label>Website <span style="color:var(--faint);font-weight:400">(optional)</span></label>
+            <input type="text" id="cWebsite" placeholder="https://yourbusiness.com" />
+            <a href="#" id="cWebsiteLink" target="_blank" rel="noopener noreferrer" class="hidden" style="display:inline-block;font-size:12px;color:#c4b8ff;margin-top:6px;text-decoration:none"></a>
+          </div>
           <div class="field"><label>Tone</label><input type="text" id="cTone" placeholder="friendly and concise" /></div>
         </div>
         <div class="card">
           <h3>What the bot knows</h3>
           <p class="hint">Products, prices, hours, policies. The bot answers only from this — it will say it doesn't know rather than invent something.</p>
-          <div class="field"><textarea id="cBusinessInfo" style="min-height:190px"></textarea></div>
+          <div class="field"><label>Import from website <span style="color:var(--faint);font-weight:400">(optional)</span></label>
+            <input type="text" id="cCrawlUrl" placeholder="https://yourbusiness.com" /></div>
+          <button class="btn btn-ghost btn-sm" id="cCrawlBtn">Fetch content</button>
+          <div id="cCrawlStatus"></div>
+          <div class="field" style="margin-top:15px"><label>Import from a PDF <span style="color:var(--faint);font-weight:400">(optional — extracts automatically as soon as you choose a file)</span></label>
+            <input type="file" id="cPdfFile" accept="application/pdf" /></div>
+          <div id="cPdfStatus"></div>
+          <div class="field hidden" id="cPdfExtractedWrap" style="margin-top:11px">
+            <label>Extracted from PDF <span style="color:var(--faint);font-weight:400">(review/edit — merges into business info below only when you save)</span></label>
+            <textarea id="cPdfExtractedInfo" style="min-height:120px"></textarea>
+          </div>
+          <div class="field" style="margin-top:15px">
+            <textarea id="cBusinessInfo" style="min-height:190px"></textarea>
+          </div>
         </div>
         <div class="card">
           <h3>FAQs</h3>
@@ -434,7 +453,19 @@
           <p class="hint">When you pick up a chat, this name and photo replace the bot's in the visitor's widget.</p>
           <div id="profileMsg"></div>
           <div class="field"><label>Display name</label><input type="text" id="pName" /></div>
-          <div class="field"><label>Photo URL (optional)</label><input type="text" id="pAvatar" placeholder="https://…" /></div>
+          <div class="field">
+            <label>Profile photo <span style="color:var(--faint);font-weight:400">(optional — resized automatically, square works best)</span></label>
+            <div style="display:flex;align-items:center;gap:13px">
+              <div class="avatar" id="pAvatarPreview" style="width:52px;height:52px;font-size:16px;flex-shrink:0"></div>
+              <input type="file" id="pAvatarFile" accept="image/png,image/jpeg,image/webp" style="flex:1" />
+            </div>
+            <div id="pAvatarStatus" style="margin-top:8px"></div>
+            <!-- Holds the actual value that gets saved: either the loaded
+                 avatarUrl, or a resized data: URI once a file is chosen.
+                 Kept as the single source of truth so the save handler
+                 doesn't need to know which case it's in. -->
+            <input type="hidden" id="pAvatar" />
+          </div>
           <div class="field"><label>New password (leave blank to keep current)</label><input type="password" id="pPass" autocomplete="new-password" /></div>
           <button class="btn" id="saveProfileBtn">Save profile</button>
         </div>
@@ -478,6 +509,8 @@
         <div class="field"><label>Brand colour</label><input type="color" id="adminBrandColor" style="height:42px;padding:4px" /></div>
       </div>
       <div class="field"><label>Welcome message</label><input type="text" id="adminWelcome" placeholder="Hi! How can I help you today?" /></div>
+      <div class="field"><label>Website <span style="color:var(--faint);font-weight:400">(optional — the business's own site, shown as a link in the list above)</span></label>
+        <input type="text" id="adminWebsite" placeholder="https://theirbusiness.com" /></div>
       <div class="field"><label>Bot profile picture <span style="color:var(--faint);font-weight:400">(optional)</span></label>
         <input type="text" id="adminAvatarUrl" placeholder="https://…" /></div>
       <div class="field"><label>Personality</label><textarea id="adminTone" placeholder="friendly and concise"></textarea></div>
@@ -588,6 +621,22 @@
       .map(function (w) { return w[0]; }).join("").toUpperCase();
   }
 
+  // Text-initials circle by default, swapped for an <img> once there's a
+  // photo -- the same fallback pattern used for the sidebar's own avatar
+  // and for message-bubble avatars throughout the app.
+  function renderAvatarInto(el, name, avatarUrl) {
+    if (avatarUrl) {
+      el.innerHTML = "";
+      var img = document.createElement("img");
+      img.src = avatarUrl;
+      img.alt = "";
+      img.style.cssText = "width:100%;height:100%;border-radius:50%;object-fit:cover";
+      el.appendChild(img);
+    } else {
+      el.textContent = initials(name);
+    }
+  }
+
   // ---------- auth ----------
 
   function showLogin() {
@@ -608,10 +657,7 @@
     $("wsName").textContent = payload.workspace.botName || payload.workspace.id;
     $("meName").textContent = state.me.name;
     $("meRole").textContent = state.me.role;
-    $("meAvatar").textContent = initials(state.me.name);
-    if (state.me.avatarUrl) {
-      $("meAvatar").outerHTML = '<img class="avatar" id="meAvatar" src="' + esc(state.me.avatarUrl) + '" alt="" />';
-    }
+    renderAvatarInto($("meAvatar"), state.me.name, state.me.avatarUrl);
     // Agents don't get Team or Settings. The server enforces this too --
     // hiding the buttons is convenience, not the security boundary.
     var ownerOnly = document.querySelectorAll(".owner-only");
@@ -620,6 +666,7 @@
     }
     $("pName").value = state.me.name;
     $("pAvatar").value = state.me.avatarUrl || "";
+    renderAvatarInto($("pAvatarPreview"), state.me.name, state.me.avatarUrl);
 
     state.firstPoll = true;
     startPolling();
@@ -755,18 +802,30 @@
     row.className = "ws-row";
     row.dataset.id = w.id;
 
+    // Only shown when this workspace actually has one set -- no dead link
+    // taking up space for the businesses that haven't filled it in.
+    var websiteLink = "";
+    if (w.website) {
+      var hostname = w.website;
+      try { hostname = new URL(w.website).hostname; } catch (e) { /* keep the raw string */ }
+      websiteLink = '<a class="ws-website" href="' + esc(w.website) + '" target="_blank" rel="noopener noreferrer">' + esc(hostname) + " ↗</a>";
+    }
+
     var main = document.createElement("div");
     main.className = "ws-row-main";
     main.innerHTML =
       '<div class="ws-swatch" style="background:' + esc(w.brandColor || "#6366f1") + '"></div>' +
       '<div class="ws-meta"><div class="ws-name">' + esc(w.botName || w.id) + '</div>' +
-      '<div class="ws-id">' + esc(w.id) + '</div></div>' +
+      '<div class="ws-id">' + esc(w.id) + '</div>' + websiteLink + '</div>' +
       '<div class="ws-stats">' +
         '<span class="ws-pill">' + w.faqCount + ' FAQ' + (w.faqCount === 1 ? "" : "s") + '</span>' +
         '<span class="ws-pill ws-pill-users">' + w.userCount + ' team member' + (w.userCount === 1 ? "" : "s") + '</span>' +
       '</div>' +
       '<svg class="ws-caret" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M9 6l6 6-6 6"/></svg>';
-    main.addEventListener("click", function () {
+    main.addEventListener("click", function (e) {
+      // Let the website link navigate on its own instead of also toggling
+      // the row open/closed underneath it.
+      if (e.target.closest(".ws-website")) return;
       var wasOpen = row.classList.contains("open");
       row.classList.toggle("open", !wasOpen);
       if (!wasOpen) loadAdminTeam(w.id, row.querySelector(".ws-detail"));
@@ -877,6 +936,7 @@
     $("adminBotName").value = c.botName || "";
     $("adminBrandColor").value = c.brandColor || "#6366f1";
     $("adminWelcome").value = c.welcomeMessage || "";
+    $("adminWebsite").value = c.website || "";
     $("adminAvatarUrl").value = c.avatarUrl || "";
     $("adminTone").value = c.tone || "";
     $("adminBusinessInfo").value = c.businessInfo || "";
@@ -907,6 +967,7 @@
     $("adminBotName").value = "";
     $("adminBrandColor").value = "#6366f1";
     $("adminWelcome").value = "";
+    $("adminWebsite").value = "";
     $("adminAvatarUrl").value = "";
     $("adminTone").value = "friendly and concise";
     $("adminBusinessInfo").value = "";
@@ -1016,6 +1077,7 @@
       botName: $("adminBotName").value.trim(),
       welcomeMessage: $("adminWelcome").value.trim(),
       brandColor: $("adminBrandColor").value,
+      website: $("adminWebsite").value.trim(),
       avatarUrl: $("adminAvatarUrl").value.trim(),
       tone: $("adminTone").value.trim(),
       businessInfo: businessInfo,
@@ -1429,14 +1491,33 @@
 
   // ---------- settings ----------
 
+  // Shows the saved website as a clickable "Visit yourbusiness.com ↗" link
+  // right under the field, hidden entirely when nothing's set.
+  function updateWebsiteLink(website) {
+    var link = $("cWebsiteLink");
+    if (!website) { link.classList.add("hidden"); return; }
+    var hostname = website;
+    try { hostname = new URL(website).hostname; } catch (e) { /* keep the raw string */ }
+    link.href = website;
+    link.textContent = "Visit " + hostname + " ↗";
+    link.classList.remove("hidden");
+  }
+
   function loadClient() {
     api("/workspace/client").then(function (c) {
       state.client = c;
       $("cBotName").value = c.botName || "";
       $("cBrandColor").value = c.brandColor || "#6366f1";
       $("cWelcome").value = c.welcomeMessage || "";
+      $("cWebsite").value = c.website || "";
+      updateWebsiteLink(c.website || "");
       $("cTone").value = c.tone || "";
       $("cBusinessInfo").value = c.businessInfo || "";
+      $("cPdfExtractedInfo").value = "";
+      $("cPdfExtractedWrap").classList.add("hidden");
+      $("cPdfFile").value = "";
+      $("cPdfStatus").innerHTML = "";
+      $("cCrawlStatus").innerHTML = "";
       renderFaqs(c.faqs || []);
       // c.id is this workspace's own clientId -- a signed-in owner can only
       // ever load their own client (see requireOwner + workspace.js), so
@@ -1502,6 +1583,45 @@
     bindFaqDeletes();
   });
 
+  // Extraction runs automatically the moment a file is chosen -- no
+  // "Extract" button. It lands in its own box (cPdfExtractedInfo) rather
+  // than being spliced into cBusinessInfo immediately, so it's reviewable/
+  // editable on its own and doesn't touch what's already been typed until
+  // Save actually merges the two (see the save handler below).
+  $("cPdfFile").addEventListener("change", function () {
+    var statusEl = $("cPdfStatus");
+    var file = this.files[0];
+    if (!file) return;
+    statusEl.innerHTML = '<div class="hint">Extracting…</div>';
+    var formData = new FormData();
+    formData.append("pdf", file);
+    fetch("/api/workspace/client/extract-pdf", { method: "POST", credentials: "same-origin", body: formData })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
+      .then(function (res) {
+        if (!res.ok) throw new Error(res.data.error || "Extraction failed");
+        $("cPdfExtractedInfo").value = res.data.businessInfo;
+        $("cPdfExtractedWrap").classList.remove("hidden");
+        statusEl.innerHTML = '<div class="ok">Extracted text from ' + esc(res.data.filename) +
+          " — review it below, it merges in automatically when you save.</div>";
+      })
+      .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
+  });
+
+  $("cCrawlBtn").addEventListener("click", function () {
+    var statusEl = $("cCrawlStatus");
+    var url = $("cCrawlUrl").value.trim();
+    if (!url) { statusEl.innerHTML = '<div class="err">Enter a URL first.</div>'; return; }
+    statusEl.innerHTML = '<div class="hint">Fetching…</div>';
+    api("/workspace/client/crawl", { method: "POST", body: { url: url } })
+      .then(function (data) {
+        var box = $("cBusinessInfo");
+        box.value = box.value ? box.value + "\n\n" + data.businessInfo : data.businessInfo;
+        statusEl.innerHTML = '<div class="ok">Imported ' + data.pages.length + ' page(s): ' +
+          esc(data.pages.join(", ")) + '. Review/edit the text below before saving.</div>';
+      })
+      .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
+  });
+
   $("saveClientBtn").addEventListener("click", function () {
     var faqs = [];
     var items = $("faqList").querySelectorAll(".faq-item");
@@ -1510,13 +1630,29 @@
       var a = items[i].querySelector(".faq-a").value.trim();
       if (q && a) faqs.push({ question: q, answer: a });
     }
+    // The PDF box is a staging area, kept separate from cBusinessInfo so an
+    // extraction never overwrites what's already been typed -- the two only
+    // combine right here, at the moment of saving.
+    var manualInfo = $("cBusinessInfo").value.trim();
+    var pdfInfo = $("cPdfExtractedInfo").value.trim();
+    var businessInfo = manualInfo && pdfInfo ? manualInfo + "\n\n" + pdfInfo : (manualInfo || pdfInfo);
+
     api("/workspace/client", { method: "POST", body: {
       botName: $("cBotName").value, brandColor: $("cBrandColor").value,
-      welcomeMessage: $("cWelcome").value, tone: $("cTone").value,
-      businessInfo: $("cBusinessInfo").value, faqs: faqs,
-    }}).then(function () {
+      welcomeMessage: $("cWelcome").value, website: $("cWebsite").value.trim(), tone: $("cTone").value,
+      businessInfo: businessInfo, faqs: faqs,
+    }}).then(function (c) {
       $("settingsMsg").innerHTML = '<div class="ok">Saved. Your widget updates on the next page load.</div>';
       setTimeout(function () { $("settingsMsg").innerHTML = ""; }, 4000);
+      // Fold the merge into the visible box and clear the staging area --
+      // the server only ever stores one businessInfo string, so once saved
+      // there's nothing left to keep separate.
+      $("cBusinessInfo").value = businessInfo;
+      $("cPdfExtractedInfo").value = "";
+      $("cPdfExtractedWrap").classList.add("hidden");
+      $("cPdfFile").value = "";
+      $("cPdfStatus").innerHTML = "";
+      updateWebsiteLink(c.website || "");
     }).catch(function (err) {
       $("settingsMsg").innerHTML = '<div class="err">' + esc(err.message) + "</div>";
     });
@@ -1524,13 +1660,70 @@
 
   // ---------- profile ----------
 
+  // Uploading a photo resizes/compresses it client-side into a small square
+  // JPEG data: URI (no file-storage backend to upload to) and stashes it in
+  // the hidden #pAvatar field -- the actual save still happens on "Save
+  // profile" like everything else here, this just prepares the value.
+  // MAX_AVATAR_DATA_URI_LENGTH mirrors the server-side cap in lib/users.js;
+  // checking it here means a too-large result surfaces a clear message
+  // instead of a generic request failure once submitted.
+  var MAX_AVATAR_DIMENSION = 160;
+  var AVATAR_JPEG_QUALITY = 0.82;
+  var MAX_AVATAR_DATA_URI_LENGTH = 300 * 1024;
+
+  $("pAvatarFile").addEventListener("change", function () {
+    var statusEl = $("pAvatarStatus");
+    var fileInput = this;
+    var file = fileInput.files[0];
+    if (!file) return;
+    if (file.size > 8 * 1024 * 1024) {
+      statusEl.innerHTML = '<div class="err">That image is too large — choose one under 8MB.</div>';
+      fileInput.value = "";
+      return;
+    }
+    statusEl.innerHTML = '<div class="hint">Processing…</div>';
+
+    var reader = new FileReader();
+    reader.onload = function () {
+      var img = new Image();
+      img.onload = function () {
+        // Center-crop to a square before resizing, so an odd-shaped photo
+        // still ends up as a normal-looking round avatar rather than
+        // stretched or letterboxed.
+        var side = Math.min(img.width, img.height);
+        var sx = (img.width - side) / 2;
+        var sy = (img.height - side) / 2;
+        var canvas = document.createElement("canvas");
+        canvas.width = MAX_AVATAR_DIMENSION;
+        canvas.height = MAX_AVATAR_DIMENSION;
+        canvas.getContext("2d").drawImage(img, sx, sy, side, side, 0, 0, MAX_AVATAR_DIMENSION, MAX_AVATAR_DIMENSION);
+        var dataUrl = canvas.toDataURL("image/jpeg", AVATAR_JPEG_QUALITY);
+        if (dataUrl.length > MAX_AVATAR_DATA_URI_LENGTH) {
+          statusEl.innerHTML = '<div class="err">Couldn\'t compress that image small enough — try a simpler photo.</div>';
+          return;
+        }
+        $("pAvatar").value = dataUrl;
+        renderAvatarInto($("pAvatarPreview"), $("pName").value, dataUrl);
+        statusEl.innerHTML = '<div class="ok">Photo ready — click Save profile to apply it.</div>';
+      };
+      img.onerror = function () { statusEl.innerHTML = '<div class="err">Couldn\'t read that file as an image.</div>'; };
+      img.src = reader.result;
+    };
+    reader.onerror = function () { statusEl.innerHTML = '<div class="err">Couldn\'t read that file.</div>'; };
+    reader.readAsDataURL(file);
+  });
+
   $("saveProfileBtn").addEventListener("click", function () {
     var body = { name: $("pName").value, avatarUrl: $("pAvatar").value };
     if ($("pPass").value) body.password = $("pPass").value;
     api("/auth/me", { method: "POST", body: body }).then(function (payload) {
       state.me = payload.user;
       $("meName").textContent = state.me.name;
+      renderAvatarInto($("meAvatar"), state.me.name, state.me.avatarUrl);
+      renderAvatarInto($("pAvatarPreview"), state.me.name, state.me.avatarUrl);
+      $("pAvatar").value = state.me.avatarUrl || "";
       $("pPass").value = "";
+      $("pAvatarStatus").innerHTML = "";
       $("profileMsg").innerHTML = '<div class="ok">Profile saved.</div>';
       setTimeout(function () { $("profileMsg").innerHTML = ""; }, 3500);
     }).catch(function (err) {

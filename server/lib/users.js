@@ -43,6 +43,34 @@ function isValidEmail(email) {
   return value.length >= 3 && value.length <= 200 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
+// An agent's profile photo, rendered straight into the visitor's widget
+// once they claim a chat (see assignAgent in lib/sessions.js). Accepts
+// either an ordinary http(s) link, or a data: URI from the "My profile"
+// tab's upload-and-resize-client-side flow -- explicitly only the safe
+// raster formats (never image/svg+xml, which can carry embedded scripts,
+// and never a non-image mime type). MAX_AVATAR_DATA_URI_LENGTH is generous
+// for a client-resized small square photo but still bounded, since this
+// whole user record is stored as one value.
+const MAX_AVATAR_DATA_URI_LENGTH = 300 * 1024;
+const MAX_AVATAR_URL_LENGTH = 2000;
+
+function sanitizeAvatar(value) {
+  if (typeof value !== "string") return "";
+  const trimmed = value.trim();
+  if (!trimmed) return "";
+  if (trimmed.startsWith("data:")) {
+    if (!/^data:image\/(png|jpe?g|webp);base64,/i.test(trimmed)) return "";
+    return trimmed.length <= MAX_AVATAR_DATA_URI_LENGTH ? trimmed : "";
+  }
+  try {
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.href.length <= MAX_AVATAR_URL_LENGTH ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
+
 function hashPassword(password) {
   const salt = crypto.randomBytes(16).toString("hex");
   return new Promise((resolve, reject) => {
@@ -193,7 +221,7 @@ async function createUser({ clientId, email, password, name, role, avatarUrl }) 
     clientId,
     email: normalized,
     name: (typeof name === "string" && name.trim().slice(0, 60)) || normalized.split("@")[0],
-    avatarUrl: typeof avatarUrl === "string" ? avatarUrl.trim().slice(0, 500) : "",
+    avatarUrl: sanitizeAvatar(avatarUrl),
     role,
     passwordSalt,
     passwordHash,
@@ -212,7 +240,7 @@ async function updateUser(userId, changes) {
 
   if (changes.name !== undefined) user.name = String(changes.name).trim().slice(0, 60);
   if (changes.avatarUrl !== undefined) {
-    user.avatarUrl = String(changes.avatarUrl).trim().slice(0, 500);
+    user.avatarUrl = sanitizeAvatar(changes.avatarUrl);
   }
   if (changes.role !== undefined) {
     if (!ROLES.includes(changes.role)) throw new Error("Invalid role");
