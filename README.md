@@ -40,11 +40,19 @@ any website; each business gets its own knowledge base (product info + FAQs).
   build step. Reads `data-client-id` off its own `<script>` tag and infers the
   API base URL from where it was loaded — so the exact same file works for
   every customer with zero configuration.
-- `public/admin.html` — the platform-owner console, gated by `ADMIN_KEY`.
-  Above the create/edit form is **Your workspaces**: every business on this
-  server (`GET /api/admin/workspaces`, brand/FAQ-count/team-size in one
+- `public/app.html` — the Agent Desk. Two things live in this one file: the
+  customer-facing CRM where a business signs in to answer live chats and
+  manage its own bot (see The Agent Desk below), and — behind the "Admin"
+  button on its login screen — the platform-owner console, gated by
+  `ADMIN_KEY`. There is no separate admin page; that used to be
+  `public/admin.html`, deleted once its "Platform Admin" view was fully
+  ported into this file, so there'd be exactly one dashboard rather than two
+  places doing the same thing.
+
+  The platform-admin side opens on **Your workspaces**: every business on
+  this server (`GET /api/admin/workspaces`, brand/FAQ-count/team-size in one
   round trip), each expandable in place to see its team, add or remove a
-  login, or delete the workspace outright — this is the UI for the "two
+  login, or delete the workspace outright — the UI for the "two
   platform-owner calls" described under Onboarding a business below, so you
   no longer need curl for it. Clicking a workspace's Edit button prefills
   the form below (locking the Client ID field, since re-typing it would
@@ -69,8 +77,6 @@ any website; each business gets its own knowledge base (product info + FAQs).
   - **FAQs** now do triple duty: they go into the AI's prompt, the widget
     shows the top 3 as an inline preview on Home, and the full list as a
     browsable Help tab (see below).
-- `public/app.html` — the Agent Desk: the customer-facing CRM where a
-  business signs in to answer live chats and manage its own bot. See below.
 - `public/demo.html` — a stand-in customer website with the widget embedded,
   for end-to-end testing.
 - `server/data/clients/*.json` — one JSON file per business (their knowledge
@@ -80,9 +86,8 @@ any website; each business gets its own knowledge base (product info + FAQs).
   `server/lib/sessions.js` transparently switch to Redis instead, since
   serverless hosts don't offer a persistent disk or long-lived memory.
 
-Knowledge base entry has three paths feeding one `businessInfo` field,
-present identically in `admin.html` and the ported admin panel inside
-`/app.html`:
+Knowledge base entry has three paths feeding one `businessInfo` field, in
+the platform-admin panel described above (`/app.html`, "Admin" button):
 - **Manual** — paste product info and add FAQs directly.
 - **Import from website** — enter the business's URL and click "Fetch
   content"; `server/lib/crawler.js` fetches the page plus a few same-domain
@@ -345,27 +350,27 @@ client; `/api/workspace` is a customer and can only ever reach their own.**
 No workspace route reads a `clientId` from the request — it always comes off
 the authenticated user, so editing a URL can't cross the boundary.
 
-**Platform admin lives on the same login screen now, not a separate page.**
-An "Admin" button in the login screen's top-right corner swaps the card into
-a one-field `ADMIN_KEY` form; on success it opens `#adminPanel` — the exact
-same workspaces-list-plus-create/edit-form that `admin.html` has always had,
-just dark-themed to match the rest of the Agent Desk and reusing its
-existing `.card`/`.field`/`.faq-item` styles rather than new CSS. This is
-purely a *front-end* merge: `state.adminKey` is a plain JS variable used
-only as the `x-admin-key` header on `/api/admin/*` calls (via a separate
-`adminApi()` helper, never the cookie-based `api()` the workspace login
-uses) — it is never written to a cookie or persisted, so a page reload
-signs the platform admin out but leaves any workspace session alone.
-`admin.html` itself is untouched and still works standalone; this just
-means you no longer have to leave `/app.html` to onboard a business.
+**Platform admin lives on the same login screen, not a separate page.** An
+"Admin" button in the login screen's top-right corner swaps the card into a
+one-field `ADMIN_KEY` form; on success it opens `#adminPanel` — the
+workspaces list plus create/edit form, dark-themed to match the rest of the
+Agent Desk and reusing its existing `.card`/`.field`/`.faq-item` styles
+rather than new CSS. There used to be a second, separate `admin.html` page
+with this same UI in a lighter theme; once everything it did was fully
+ported in here, keeping two dashboards for one job stopped making sense, so
+it was deleted. `state.adminKey` is a plain JS variable used only as the
+`x-admin-key` header on `/api/admin/*` calls (via a separate `adminApi()`
+helper, never the cookie-based `api()` the workspace login uses) — it is
+never written to a cookie or persisted, so a page reload signs the platform
+admin out but leaves any workspace session alone.
 
 **Two roles.** `owner` is the business: answers chats *and* edits the
 knowledge base, branding and team. `agent` is their staff: chats only. The
 dashboard hides Team/Settings from agents, but the server enforces it
 (`requireOwner`) — the hiding is convenience, not the boundary.
 
-**The embed snippet lives in Settings, not just `admin.html`.** The top
-card there ("Embed on your website") shows the exact `<script>` tag for
+**The embed snippet lives in Settings, not just the platform-admin panel.**
+The top card there ("Embed on your website") shows the exact `<script>` tag for
 this workspace, built client-side from `window.location.origin` and the
 workspace's own id (returned by `GET /api/workspace/client`, which an
 owner can only ever fetch for their own client — no new endpoint needed).
@@ -383,9 +388,9 @@ before it expires (7 days), so changing a password doesn't sign out other
 devices.
 
 **Onboarding a business** is two platform-owner calls — create the client,
-then mint its first owner login. `admin.html`'s workspaces list is the UI
-for both (create via the form, add the owner login by expanding the new
-row), or drive it directly:
+then mint its first owner login. The platform-admin panel's workspaces list
+(`/app.html`, "Admin" button) is the UI for both (create via the form, add
+the owner login by expanding the new row), or drive it directly:
 
 ```bash
 curl -X POST http://localhost:3000/api/admin/clients   -H "x-admin-key: $ADMIN_KEY" -H "Content-Type: application/json"   -d '{"id":"joes-pizza","botName":"Joe","businessInfo":"..."}'
@@ -468,8 +473,9 @@ npm start
 
 Then open:
 - http://localhost:3000/demo.html — try the widget as an end user
-- http://localhost:3000/admin.html — onboard a new business (paste their
-  product info, get their embed snippet)
+- http://localhost:3000/app.html — click "Admin" on the login screen to
+  onboard a new business (paste their product info, get their embed
+  snippet), or sign in with a workspace login to try the Agent Desk itself
 
 ## Embedding on a real website
 
@@ -522,8 +528,8 @@ Steps:
    vercel.com — either way, add these environment variables in the Vercel
    project settings: `GEMINI_API_KEY`, `ADMIN_KEY`, `UPSTASH_REDIS_REST_URL`,
    `UPSTASH_REDIS_REST_TOKEN` (same values as your local `.env`).
-3. Deploy. Your admin panel and widget are now at
-   `https://your-project.vercel.app/admin.html` and
+3. Deploy. Your Agent Desk and widget are now at
+   `https://your-project.vercel.app/app.html` and
    `https://your-project.vercel.app/widget.js` — swap that domain into every
    client's embed snippet in place of `localhost:3000`.
 

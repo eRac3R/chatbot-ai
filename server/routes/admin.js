@@ -50,10 +50,11 @@ router.get("/clients", async (req, res) => {
   res.json({ clients: await listClients() });
 });
 
-// Everything the "all workspaces" view in admin.html needs in one round
-// trip: per-business summary (brand, FAQ count, timestamps) plus how many
-// people can sign in to each, broken down by role. Distinct from the bare
-// id list above, which older tooling may still depend on.
+// Everything the Agent Desk's "Platform Admin" view (public/app.html,
+// #adminPanel) needs in one round trip: per-business summary (brand, FAQ
+// count, timestamps) plus how many people can sign in to each, broken down
+// by role. Distinct from the bare id list above, which older tooling may
+// still depend on.
 router.get("/workspaces", async (req, res) => {
   const summaries = await listClientSummaries();
   const workspaces = await Promise.all(

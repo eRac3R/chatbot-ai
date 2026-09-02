@@ -705,8 +705,8 @@
     btn.disabled = true; btn.textContent = "Signing in…";
     $("adminLoginErr").classList.add("hidden");
     // No dedicated admin-login endpoint exists -- ADMIN_KEY is verified
-    // per-request, same as admin.html always did. This call both checks
-    // the key is real and gets the first workspaces list in one round trip.
+    // per-request everywhere under /api/admin. This call both checks the
+    // key is real and gets the first workspaces list in one round trip.
     fetch("/api/admin/workspaces", { headers: { "x-admin-key": key } })
       .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, data: d }; }); })
       .then(function (res) {

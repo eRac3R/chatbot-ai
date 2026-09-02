@@ -54,8 +54,7 @@ if (require.main === module) {
   app.listen(PORT, () => {
     console.log(`chatbot-ai server listening on http://localhost:${PORT}`);
     console.log(`  Widget script:  http://localhost:${PORT}/widget.js`);
-    console.log(`  Admin panel:    http://localhost:${PORT}/admin.html`);
-    console.log(`  Agent CRM:      http://localhost:${PORT}/app.html`);
+    console.log(`  Agent CRM:      http://localhost:${PORT}/app.html  (Admin button on the login screen)`);
     console.log(`  Demo page:      http://localhost:${PORT}/demo.html`);
   });
 }
