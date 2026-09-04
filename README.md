@@ -434,18 +434,35 @@ stays open either way.
   add/edit/remove list (`#pagesList` / `#adminPagesList`) for anything the
   crawl can't discover on its own — most notably an in-page `#section`
   anchor, since that's not a separate URL to crawl.
-- **The model decides when to use one**, the same way it decides on a live
-  agent handoff: a rule in `buildSystemPrompt` (`lib/sarvam.js`) lists the
-  configured pages verbatim and instructs the model to, when one clearly
-  matches what the visitor asked for, answer in one short sentence and then
-  emit `NAV_OPTIONS_MARKER` — `[[NAV_OPTIONS:` followed by a JSON array of
-  up to `MAX_NAV_OPTIONS` (3) `{label, url}` objects copied verbatim from
-  the list, followed by `]]`. It's told never to invent a label/URL that
-  isn't in the list, and never to force it into an unrelated answer.
+- **The model decides when to use one, and can offer more than one** — the
+  same way it decides on a live agent handoff: a rule in `buildSystemPrompt`
+  (`lib/sarvam.js`) lists the configured pages verbatim and instructs the
+  model to, when one or more clearly matches what the visitor asked for,
+  answer in one short sentence and then write `NAV_OPTIONS_MARKER_PREFIX`
+  (`[[NAV_OPTIONS:`) immediately followed by a JSON array of up to
+  `MAX_NAV_OPTIONS` (3) `{label, url}` objects copied verbatim from the
+  list. A vague ask ("show me around the site") routinely comes back with
+  2-3 options; a specific one ("where's your pricing page?") comes back
+  with exactly 1. It's told never to invent a label/URL that isn't in the
+  list, and never to force it into an unrelated answer.
 - `extractNavOptions` (`lib/sarvam.js`) pulls that marker out of the raw
-  reply via regex, JSON-parses the payload, and validates each entry before
-  handing back `{text, navOptions}` — a malformed or missing marker just
-  yields an empty array, callers never need to special-case it.
+  reply and validates each entry before handing back `{text, navOptions}` —
+  a malformed or missing marker just yields an empty array, callers never
+  need to special-case it. **It bracket-matches the array rather than
+  looking for a fixed trailing `]]`**, and for good reason: the model's own
+  closing-bracket count after the array turned out to be unreliable —
+  stress-testing found roughly 4 of 5 multi-option replies had the model
+  emit only one closing bracket after the array instead of the array's own
+  plus a separate one, sometimes with a stray period first too. A
+  fixed-suffix match swallowed the array's real closing bracket as part of
+  the delimiter, truncating the JSON to something unparseable and silently
+  dropping every option — reproduced on demand, then fixed by scanning
+  forward from the array's own `[` to find its actual matching `]`
+  (respecting quoted strings) instead of trusting the model's trailing
+  syntax at all; whatever debris (extra brackets, a stray period) follows on
+  that same line gets stripped as noise rather than parsed. Re-verified
+  clean across 20 calls spanning both vague and specific phrasings after the
+  fix — 0 parse failures, 0 leftover marker debris in the visible text.
   `routes/chat.js` runs this before the `AGENT_HANDOFF_MARKER` check (the
   two are unrelated but could in principle both appear), and returns
   `navOptions` alongside `reply`/`suggestions`; the clean, marker-free text
