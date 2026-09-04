@@ -211,11 +211,11 @@
     color:var(--faint);padding:0 10px 9px;font-weight:700;
   }
   td{padding:11px 10px;border-top:1px solid var(--line);font-size:13px;vertical-align:middle}
-  .faq-item{
+  .faq-item,.page-item{
     background:var(--surface-2);border:1px solid var(--line);border-radius:11px;
     padding:13px;margin-bottom:11px;
   }
-  .faq-item .row{margin-bottom:9px}
+  .faq-item .row,.page-item .row{margin-bottom:9px}
   .toast{
     position:fixed;bottom:22px;left:50%;transform:translateX(-50%);
     background:var(--surface-2);border:1px solid var(--line);color:var(--text);
@@ -441,6 +441,12 @@
           <div id="faqList"></div>
           <button class="btn btn-ghost btn-sm" id="addFaqBtn">+ Add FAQ</button>
         </div>
+        <div class="card">
+          <h3>Page &amp; section links</h3>
+          <p class="hint">When a visitor asks where to find something (e.g. "where's your pricing page?"), the bot can reply with a clickable button that takes them straight there — same page or a different one, chat stays open either way. Filled in automatically from "Import from website" above (re-run it any time to pick up new pages) — add or edit entries below by hand too, e.g. for a <code>#section</code> anchor within a page rather than a whole separate page.</p>
+          <div id="pagesList"></div>
+          <button class="btn btn-ghost btn-sm" id="addPageBtn">+ Add page link</button>
+        </div>
       </div>
     </section>
 
@@ -549,6 +555,13 @@
       <p class="hint">Shown as tappable questions in the widget, and used as answers by the bot.</p>
       <div id="adminFaqList"></div>
       <button class="btn btn-ghost btn-sm" id="adminAddFaqBtn">+ Add FAQ</button>
+    </div>
+
+    <div class="card">
+      <h3>Page &amp; section links</h3>
+      <p class="hint">When a visitor asks where to find something, the bot can reply with a clickable button that takes them straight there. Filled in automatically from "Import from website" above — add or edit entries below by hand too, e.g. for a <code>#section</code> anchor within a page.</p>
+      <div id="adminPagesList"></div>
+      <button class="btn btn-ghost btn-sm" id="adminAddPageBtn">+ Add page link</button>
     </div>
 
     <button class="btn" id="adminSaveBtn" style="margin-bottom:14px">Save & get embed code</button>
@@ -952,6 +965,8 @@
     (c.faqs && c.faqs.length ? c.faqs : [{ question: "", answer: "" }]).forEach(function (f) {
       addAdminFaqRow(f.question, f.answer);
     });
+    $("adminPagesList").innerHTML = "";
+    (c.pages || []).forEach(function (p) { addAdminPageRow(p.label, p.url); });
     $("adminEditingName").textContent = (c.botName || c.id) + " (" + c.id + ")";
     $("adminEditingNotice").classList.remove("hidden");
     $("adminFormHeading").textContent = "Editing workspace";
@@ -978,6 +993,7 @@
     ["adminQuickReply1", "adminQuickReply2", "adminQuickReply3", "adminQuickReply4"].forEach(function (id) { $(id).value = ""; });
     $("adminFaqList").innerHTML = "";
     addAdminFaqRow();
+    $("adminPagesList").innerHTML = "";
     $("adminEditingNotice").classList.add("hidden");
     $("adminFormHeading").textContent = "New workspace";
     $("adminSaveBtn").textContent = "Save & get embed code";
@@ -1012,6 +1028,47 @@
   }
   $("adminAddFaqBtn").addEventListener("click", function () { addAdminFaqRow(); });
 
+  function addAdminPageRow(label, url) {
+    var div = document.createElement("div");
+    div.className = "page-item";
+    div.innerHTML =
+      '<div class="row"><div class="field" style="margin:0"><label>Label</label>' +
+      '<input type="text" class="page-label" value="' + esc(label || "") + '" placeholder="Pricing" /></div>' +
+      '<div class="field" style="margin:0"><label>URL</label>' +
+      '<input type="text" class="page-url" value="' + esc(url || "") + '" placeholder="https://theirbusiness.com/pricing" /></div></div>' +
+      '<button class="btn btn-danger btn-sm page-del" style="margin-top:9px">Remove</button>';
+    $("adminPagesList").appendChild(div);
+    bindAdminPageDeletes();
+  }
+  function bindAdminPageDeletes() {
+    var dels = $("adminPagesList").querySelectorAll(".page-del");
+    for (var i = 0; i < dels.length; i++) {
+      dels[i].addEventListener("click", function () { this.closest(".page-item").remove(); });
+    }
+  }
+  $("adminAddPageBtn").addEventListener("click", function () { addAdminPageRow(); });
+
+  // Mirrors mergeNavPages in the Settings tab -- skips URLs already present
+  // (case-insensitive, ignoring a trailing slash) so re-crawling doesn't
+  // duplicate rows or clobber a label already edited by hand.
+  function mergeAdminNavPages(navPages) {
+    if (!navPages || !navPages.length) return 0;
+    var existing = {};
+    var urlInputs = $("adminPagesList").querySelectorAll(".page-url");
+    for (var i = 0; i < urlInputs.length; i++) {
+      existing[urlInputs[i].value.trim().replace(/\/$/, "").toLowerCase()] = true;
+    }
+    var added = 0;
+    navPages.forEach(function (p) {
+      var key = (p.url || "").trim().replace(/\/$/, "").toLowerCase();
+      if (!key || existing[key]) return;
+      existing[key] = true;
+      addAdminPageRow(p.label, p.url);
+      added++;
+    });
+    return added;
+  }
+
   $("adminCrawlBtn").addEventListener("click", function () {
     var statusEl = $("adminCrawlStatus");
     var url = $("adminCrawlUrl").value.trim();
@@ -1021,8 +1078,11 @@
       .then(function (data) {
         var box = $("adminBusinessInfo");
         box.value = box.value ? box.value + "\n\n" + data.businessInfo : data.businessInfo;
+        var addedLinks = mergeAdminNavPages(data.navPages);
         statusEl.innerHTML = '<div class="ok">Imported ' + data.pages.length + ' page(s): ' +
-          esc(data.pages.join(", ")) + '. Review/edit the text below before saving.</div>';
+          esc(data.pages.join(", ")) + '. Review/edit the text below before saving.' +
+          (addedLinks ? " Also added " + addedLinks + " page link" + (addedLinks === 1 ? "" : "s") +
+            " below for the bot to offer as buttons." : "") + '</div>';
       })
       .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
   });
@@ -1060,6 +1120,13 @@
       var a = items[i].querySelector(".faq-a").value.trim();
       if (q && a) faqs.push({ question: q, answer: a });
     }
+    var pages = [];
+    var pageItems = $("adminPagesList").querySelectorAll(".page-item");
+    for (var pi = 0; pi < pageItems.length; pi++) {
+      var label = pageItems[pi].querySelector(".page-label").value.trim();
+      var url = pageItems[pi].querySelector(".page-url").value.trim();
+      if (label && url) pages.push({ label: label, url: url });
+    }
     // Blanks sent in place, not filtered -- the server backfills each empty
     // slot with the default for that position, so positions must line up.
     var quickReplies = ["adminQuickReply1", "adminQuickReply2", "adminQuickReply3", "adminQuickReply4"]
@@ -1082,6 +1149,7 @@
       tone: $("adminTone").value.trim(),
       businessInfo: businessInfo,
       faqs: faqs,
+      pages: pages,
       quickReplies: quickReplies,
     };
     if (!payload.id) {
@@ -1519,6 +1587,7 @@
       $("cPdfStatus").innerHTML = "";
       $("cCrawlStatus").innerHTML = "";
       renderFaqs(c.faqs || []);
+      renderPages(c.pages || []);
       // c.id is this workspace's own clientId -- a signed-in owner can only
       // ever load their own client (see requireOwner + workspace.js), so
       // there's no risk of building someone else's snippet here.
@@ -1583,6 +1652,57 @@
     bindFaqDeletes();
   });
 
+  function renderPages(pages) {
+    $("pagesList").innerHTML = "";
+    pages.forEach(function (p) { addPageRow(p.label, p.url); });
+  }
+
+  function bindPageDeletes() {
+    var dels = $("pagesList").querySelectorAll(".page-del");
+    for (var i = 0; i < dels.length; i++) {
+      dels[i].addEventListener("click", function () { this.closest(".page-item").remove(); });
+    }
+  }
+
+  function addPageRow(label, url) {
+    var div = document.createElement("div");
+    div.className = "page-item";
+    div.innerHTML =
+      '<div class="row"><div class="field" style="margin:0"><label>Label</label>' +
+      '<input type="text" class="page-label" value="' + esc(label || "") + '" placeholder="Pricing" /></div>' +
+      '<div class="field" style="margin:0"><label>URL</label>' +
+      '<input type="text" class="page-url" value="' + esc(url || "") + '" placeholder="https://yourbusiness.com/pricing" /></div></div>' +
+      '<button class="btn btn-danger btn-sm page-del" style="margin-top:9px">Remove</button>';
+    $("pagesList").appendChild(div);
+    bindPageDeletes();
+  }
+
+  // Merges freshly-crawled page links into the editor without disturbing
+  // rows already there -- skips anything whose URL is already present
+  // (case-insensitive, ignoring a trailing slash) rather than duplicating it
+  // or clobbering a label the owner already edited by hand.
+  function mergeNavPages(navPages) {
+    if (!navPages || !navPages.length) return 0;
+    var existing = {};
+    var urlInputs = $("pagesList").querySelectorAll(".page-url");
+    for (var i = 0; i < urlInputs.length; i++) {
+      existing[urlInputs[i].value.trim().replace(/\/$/, "").toLowerCase()] = true;
+    }
+    var added = 0;
+    navPages.forEach(function (p) {
+      var key = (p.url || "").trim().replace(/\/$/, "").toLowerCase();
+      if (!key || existing[key]) return;
+      existing[key] = true;
+      addPageRow(p.label, p.url);
+      added++;
+    });
+    return added;
+  }
+
+  $("addPageBtn").addEventListener("click", function () {
+    addPageRow();
+  });
+
   // Extraction runs automatically the moment a file is chosen -- no
   // "Extract" button. It lands in its own box (cPdfExtractedInfo) rather
   // than being spliced into cBusinessInfo immediately, so it's reviewable/
@@ -1616,8 +1736,14 @@
       .then(function (data) {
         var box = $("cBusinessInfo");
         box.value = box.value ? box.value + "\n\n" + data.businessInfo : data.businessInfo;
+        // Page/section link buttons are populated automatically from the
+        // same crawl -- no separate manual step needed for a business that
+        // already imports its site content this way.
+        var addedLinks = mergeNavPages(data.navPages);
         statusEl.innerHTML = '<div class="ok">Imported ' + data.pages.length + ' page(s): ' +
-          esc(data.pages.join(", ")) + '. Review/edit the text below before saving.</div>';
+          esc(data.pages.join(", ")) + '. Review/edit the text below before saving.' +
+          (addedLinks ? " Also added " + addedLinks + " page link" + (addedLinks === 1 ? "" : "s") +
+            " below for the bot to offer as buttons." : "") + '</div>';
       })
       .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
   });
@@ -1630,6 +1756,13 @@
       var a = items[i].querySelector(".faq-a").value.trim();
       if (q && a) faqs.push({ question: q, answer: a });
     }
+    var pages = [];
+    var pageItems = $("pagesList").querySelectorAll(".page-item");
+    for (var pi = 0; pi < pageItems.length; pi++) {
+      var label = pageItems[pi].querySelector(".page-label").value.trim();
+      var url = pageItems[pi].querySelector(".page-url").value.trim();
+      if (label && url) pages.push({ label: label, url: url });
+    }
     // The PDF box is a staging area, kept separate from cBusinessInfo so an
     // extraction never overwrites what's already been typed -- the two only
     // combine right here, at the moment of saving.
@@ -1640,7 +1773,7 @@
     api("/workspace/client", { method: "POST", body: {
       botName: $("cBotName").value, brandColor: $("cBrandColor").value,
       welcomeMessage: $("cWelcome").value, website: $("cWebsite").value.trim(), tone: $("cTone").value,
-      businessInfo: businessInfo, faqs: faqs,
+      businessInfo: businessInfo, faqs: faqs, pages: pages,
     }}).then(function (c) {
       $("settingsMsg").innerHTML = '<div class="ok">Saved. Your widget updates on the next page load.</div>';
       setTimeout(function () { $("settingsMsg").innerHTML = ""; }, 4000);

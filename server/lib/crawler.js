@@ -97,6 +97,28 @@ function extractText(html) {
     .trim();
 }
 
+function extractTitle(html) {
+  const $ = cheerio.load(html);
+  return $("title").first().text().trim();
+}
+
+// Last-resort label when a page has neither usable anchor text nor a
+// <title> -- turns "/our-pricing-plans" into "Our Pricing Plans" so the
+// button the bot offers still reads like a real page name.
+function labelFromUrl(url) {
+  try {
+    const path = new URL(url).pathname.replace(/\/+$/, "");
+    const segment = path.split("/").filter(Boolean).pop();
+    if (!segment) return new URL(url).hostname;
+    return segment
+      .replace(/\.\w+$/, "")
+      .replace(/[-_]+/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase());
+  } catch {
+    return url;
+  }
+}
+
 function extractSameOriginLinks(html, baseUrl) {
   const $ = cheerio.load(html);
   const base = new URL(baseUrl);
@@ -139,19 +161,29 @@ async function crawlWebsite(startUrl) {
   }
 
   const pages = [];
+  // Every page the crawl actually reads doubles as a candidate nav
+  // button -- label preferring the anchor text a real visitor followed to
+  // get there (most natural, e.g. "Pricing"), falling back to that page's
+  // own <title>, then a label derived from its URL. This is what makes nav
+  // buttons "automatic": importing a site's content this way is already
+  // part of onboarding, so the page directory comes along for free instead
+  // of needing separate manual entry.
+  const navPages = [];
   let totalChars = 0;
 
   const startText = extractText(startHtml).slice(0, MAX_CHARS_PER_PAGE);
   if (startText) {
     pages.push({ url: startUrl, text: startText });
     totalChars += startText.length;
+    const startLabel = extractTitle(startHtml) || labelFromUrl(startUrl);
+    navPages.push({ label: startLabel.slice(0, 60), url: startUrl });
   }
 
   const candidateLinks = extractSameOriginLinks(startHtml, startUrl)
     .sort((a, b) => scoreLink(b[0], b[1]) - scoreLink(a[0], a[1]))
     .slice(0, (MAX_PAGES - 1) * 2); // fetch a few extra in case some fail
 
-  for (const [link] of candidateLinks) {
+  for (const [link, anchorText] of candidateLinks) {
     if (pages.length >= MAX_PAGES || totalChars >= MAX_TOTAL_CHARS) break;
     const html = await fetchWithLimits(link);
     if (!html) continue;
@@ -159,6 +191,8 @@ async function crawlWebsite(startUrl) {
     if (!text) continue;
     pages.push({ url: link, text });
     totalChars += text.length;
+    const label = anchorText.trim() || extractTitle(html) || labelFromUrl(link);
+    navPages.push({ label: label.slice(0, 60), url: link });
   }
 
   if (!pages.length) {
@@ -170,7 +204,7 @@ async function crawlWebsite(startUrl) {
     .join("\n\n")
     .slice(0, MAX_TOTAL_CHARS);
 
-  return { businessInfo: combined, pages: pages.map((p) => p.url) };
+  return { businessInfo: combined, pages: pages.map((p) => p.url), navPages };
 }
 
 module.exports = { crawlWebsite };

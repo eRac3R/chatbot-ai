@@ -22,6 +22,12 @@
   var API_BASE = new URL(currentScript.src).origin;
   var STORAGE_KEY = "chatwidget_session_" + clientId; // holds the VISITOR id (see below)
   var READ_STATE_KEY = "chatwidget_read_" + clientId;
+  // Which conversation was open, if any -- sessionStorage rather than
+  // localStorage, so it naturally survives a same-tab page-to-page
+  // navigation (a nav-option button, or any other link on the site) but
+  // doesn't linger once the tab/browser closes. See saveOpenState/
+  // restoreOpenState.
+  var OPEN_STATE_KEY = "chatwidget_openstate_" + clientId;
 
   // Optional: if the embedding site has its own logged-in users, it can pass
   // the user's id plus an HMAC of it (signed server-side with the client's
@@ -248,6 +254,11 @@
       ".cw-chip{background:#fff;border:1.5px solid " + rgba(brand, 0.35) + ";color:" + shade(brand, -0.25) + ";padding:8px 14px;border-radius:16px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease;line-height:1.3}" +
       ".cw-chip:hover{background:" + rgba(brand, 0.08) + ";border-color:" + brand + ";transform:translateY(-1px)}" +
       ".cw-chip:active{transform:translateY(0)}" +
+
+      /* clickable page/section links the bot offers under its reply */
+      ".cw-nav-chip{background:" + brand + ";border:none;color:#fff;padding:8px 14px;border-radius:16px;font-size:13.5px;font-weight:500;cursor:pointer;font-family:inherit;transition:all .15s ease;line-height:1.3}" +
+      ".cw-nav-chip:hover{background:" + shade(brand, -0.12) + ";transform:translateY(-1px)}" +
+      ".cw-nav-chip:active{transform:translateY(0)}" +
 
       /* messages tab -- holds the "start new" section (CTA + quick chips) */
       /* above the past-conversations list, so it shares Home's spacing     */
@@ -582,6 +593,7 @@
       els.status.style.display = "none";
       if (name === "messages") renderMessagesList();
     }
+    saveOpenState();
   }
 
   // Right-pointing chevron, used on anything tappable that navigates
@@ -804,6 +816,43 @@
     } else {
       stopPolling();
     }
+    saveOpenState();
+  }
+
+  // Persists {conversationId} so a same-tab page-to-page navigation (a
+  // nav-option button, or any other link) can reopen straight back into
+  // this same conversation once the destination page's copy of the widget
+  // loads -- see restoreOpenState, called from init(). Only persisted while
+  // an actual conversation is open and in view; closing the widget, or
+  // switching to Home/Messages/Help, clears it, so navigating away from a
+  // page where the visitor wasn't mid-conversation doesn't force it open.
+  function saveOpenState() {
+    try {
+      if (isOpen && currentView === "chat" && currentConversationId) {
+        window.sessionStorage.setItem(OPEN_STATE_KEY, JSON.stringify({ conversationId: currentConversationId }));
+      } else {
+        window.sessionStorage.removeItem(OPEN_STATE_KEY);
+      }
+    } catch (e) { /* storage unavailable -- a nav button just won't reopen the chat automatically */ }
+  }
+
+  // Read before buildUI() runs -- it calls showView("home") to set up its
+  // default view, and showView's own saveOpenState() call would otherwise
+  // clear this key first (view isn't "chat" yet at that point), wiping it
+  // before restoreOpenState ever got a chance to read it.
+  function readOpenState() {
+    try {
+      var raw = window.sessionStorage.getItem(OPEN_STATE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function restoreOpenState(state) {
+    if (!state || !state.conversationId) return;
+    toggleOpen();
+    openConversation(state.conversationId);
   }
 
   // ---- an open conversation: creating, resuming, messaging -------------
@@ -866,6 +915,51 @@
     scrollToBottom();
   }
 
+  // Page/section links the bot offers under its reply (see NAV_OPTIONS_MARKER
+  // in server/lib/sarvam.js). Unlike reply chips these are never cleared --
+  // they're tied to the specific message they appeared under and stay part
+  // of the transcript, since a visitor might want to click one after reading
+  // on rather than immediately.
+  function renderNavOptions(navOptions) {
+    if (!navOptions || !navOptions.length) return;
+    var wrap = el("div", { class: "cw-inline-chips" });
+    navOptions.forEach(function (opt) {
+      var chip = el("button", { class: "cw-nav-chip", type: "button", text: opt.label + "  →" });
+      chip.addEventListener("click", function () { navigateTo(opt.url); });
+      wrap.appendChild(chip);
+    });
+    els.messages.appendChild(wrap);
+    scrollToBottom();
+  }
+
+  // True when `url` points at the page already open (same origin+path,
+  // possibly a different #hash) -- clicking a nav button for one of these
+  // should just jump there in place, not reload the page.
+  function isSamePageUrl(url) {
+    try {
+      var target = new URL(url, window.location.href);
+      return target.origin === window.location.origin && target.pathname === window.location.pathname;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  function navigateTo(url) {
+    if (isSamePageUrl(url)) {
+      var target = new URL(url, window.location.href);
+      if (target.hash) window.location.hash = target.hash;
+      return;
+    }
+    // Leaving the page entirely -- there's no way to keep this page's JS
+    // (and with it, the widget) alive across a real navigation. Persist
+    // where the visitor was so the widget reopens straight back into this
+    // same conversation once the destination page's copy of it loads (see
+    // restoreOpenState, called from init()) -- that's what "keeping the
+    // chat open" across a page-to-page nav button actually means here.
+    saveOpenState();
+    window.location.href = url;
+  }
+
   // Home's "Message us directly", Messages' "Send us a message", and Help's
   // "Ask our assistant" link all land here -- always a genuinely new
   // conversation, never reusing whatever was open before.
@@ -884,6 +978,7 @@
       .then(function (res) {
         if (!res.ok) throw new Error(res.data.error || "Could not start a conversation");
         currentConversationId = res.data.sessionId;
+        saveOpenState();
         fetchConversations();
         renderReplyChips(config.quickReplies);
       })
@@ -1008,6 +1103,7 @@
           // reply to show.
         } else {
           addMessage("bot", data.reply);
+          renderNavOptions(data.navOptions);
           renderReplyChips(data.suggestions);
         }
         markRead(currentConversationId, data.seq);
@@ -1085,8 +1181,10 @@
         // notices something is wrong rather than the widget silently vanishing
       })
       .finally(function () {
+        var pendingOpenState = readOpenState();
         injectStyles(config.brandColor);
         buildUI();
+        restoreOpenState(pendingOpenState);
       });
   }
 

@@ -305,35 +305,26 @@ rather than a visitor having to notice and tap a separate UI element.
   human — either an explicit ask at any point ("can I talk to a person"),
   or agreeing after being offered. This can fire on turn one just as
   easily as turn ten; it isn't gated by anything below.
-- **A third way it comes up, besides an explicit ask or the scheduled
-  nudge below: whenever the bot doesn't know something.** The grounding
-  rule used to end with "suggest the visitor contact the business
-  directly" — which sent people away from a conversation that could
-  already solve their problem, to some other channel entirely. It now
-  offers a live agent instead ("I don't have that — want me to get someone
-  who can help?"), in the same chat, which the handoff rule above then
-  picks up if they say yes.
-- **A repeating proactive nudge**, separately: once a visitor's sent
-  `LIVE_AGENT_NUDGE_START_TURN` (4) messages without asking, `routes/chat.js`
-  appends *"If you'd prefer talking to a live support agent, feel free to
-  let me know!"* to that reply — plain string concatenation, not something
-  the model decides. It repeats every `LIVE_AGENT_NUDGE_REPEAT_EVERY` (2)
-  turns after that (4, 6, 8, …) for as long as the visitor keeps going
-  without asking, worded exactly the same way each time, and never on the
-  same turn as an actual handoff (that would be a strange thing to say in
-  the same breath as "connecting you now").
-- **The nudge is kept out of what the model sees in its own history.**
-  `appendMessage` (`lib/sessions.js`) takes an optional `historyContent`
-  distinct from the displayed `content`; `toLlmHistory` prefers it when
-  present. Without this, the model imitates its own past output — once the
-  nudge sentence had appeared in its history a couple of times, it started
-  echoing/repeating that exact phrase unprompted on *later* turns too, even
-  ones the deterministic logic never touched, compounding worse each time
-  it fired (confirmed while testing: by turn 8 or so, replies came back
-  with the sentence appended two or three times over). `chat.js` stores the
-  model's clean reply as `historyContent` and the nudge-appended version
-  (when due) as `content`, so the model's context never contains a copy of
-  its own nudge text to imitate.
+- **The bot only ever offers a live agent for two reasons, both left
+  entirely to the model's own judgment** (no turn-count timer, no
+  deterministic nudge injected by code):
+  - **It genuinely doesn't know the answer.** The grounding rule used to
+    end with "suggest the visitor contact the business directly" — which
+    sent people away from a conversation that could already solve their
+    problem, to some other channel entirely. It now offers a live agent
+    instead ("I don't have that — want me to get someone who can help?"),
+    in the same chat, which the handoff rule above then picks up if they
+    say yes.
+  - **The visitor is clearly stuck** — asking the same question again, or
+    rephrasing and re-asking something already answered earlier in the
+    conversation. A separate prompt rule tells the model this means its
+    prior answer didn't actually help, and to acknowledge that and offer a
+    live agent rather than just repeating itself.
+  - An earlier version of this also nudged proactively on a fixed schedule
+    (first at turn 4, then every 2 turns) regardless of whether anything
+    was actually wrong — removed, since it meant a visitor having a
+    perfectly fine conversation still got interrupted with "want to talk to
+    a person?" for no reason tied to the conversation itself.
 - `routes/chat.js` checks the AI's raw reply for the marker, strips it
   before the visitor ever sees the text (`rawReply.split(marker).join("")`),
   and if present calls `requestAgent(session)` — the exact same function
@@ -420,6 +411,83 @@ Two things to know before putting agents in front of customers:
 - The pause timeout is per-conversation wall-clock time based on the
   visitor's last message, not tied to the widget being open — closing the
   browser doesn't pause the clock (no pun intended).
+
+### Page & section navigation buttons
+
+When a visitor asks where to find something ("where's your pricing page?",
+"how do I get to the contact section?"), the bot can answer with a clickable
+button that takes them straight there instead of just describing it in
+words — same page or a different one on the business's site, and the chat
+stays open either way.
+
+- **The page directory is per-workspace** (`pages: [{label, url}]` on the
+  client config, `lib/clients.js`, sanitized the same http(s)-only way as
+  `avatarUrl`/`website`) and is **populated automatically** rather than
+  needing to be typed in by hand: the existing "Import from website" crawl
+  (`lib/crawler.js`) already visits a handful of same-domain pages to build
+  `businessInfo`, so it now also returns `navPages` — one `{label, url}` per
+  page actually crawled, label preferred from the anchor text that linked to
+  it (falls back to that page's `<title>`, then a label derived from the URL
+  itself). Re-running the crawl merges in anything new by URL rather than
+  duplicating existing rows or overwriting a label already edited by hand.
+  The Settings tab and platform admin panel both also expose a manual
+  add/edit/remove list (`#pagesList` / `#adminPagesList`) for anything the
+  crawl can't discover on its own — most notably an in-page `#section`
+  anchor, since that's not a separate URL to crawl.
+- **The model decides when to use one**, the same way it decides on a live
+  agent handoff: a rule in `buildSystemPrompt` (`lib/sarvam.js`) lists the
+  configured pages verbatim and instructs the model to, when one clearly
+  matches what the visitor asked for, answer in one short sentence and then
+  emit `NAV_OPTIONS_MARKER` — `[[NAV_OPTIONS:` followed by a JSON array of
+  up to `MAX_NAV_OPTIONS` (3) `{label, url}` objects copied verbatim from
+  the list, followed by `]]`. It's told never to invent a label/URL that
+  isn't in the list, and never to force it into an unrelated answer.
+- `extractNavOptions` (`lib/sarvam.js`) pulls that marker out of the raw
+  reply via regex, JSON-parses the payload, and validates each entry before
+  handing back `{text, navOptions}` — a malformed or missing marker just
+  yields an empty array, callers never need to special-case it.
+  `routes/chat.js` runs this before the `AGENT_HANDOFF_MARKER` check (the
+  two are unrelated but could in principle both appear), and returns
+  `navOptions` alongside `reply`/`suggestions`; the clean, marker-free text
+  is what both the visitor sees and what goes into the model's own history,
+  same reasoning as the handoff marker.
+- The widget renders these as `.cw-nav-chip` buttons under the bot's
+  message (`renderNavOptions`, `widget.js`) — visually distinct (solid,
+  brand-colored) from the outlined suggestion chips, and unlike those,
+  never cleared: they're tied to the specific reply they appeared under and
+  stay part of the transcript, since a visitor might read on before
+  clicking one.
+- **Clicking one behaves differently depending on where it points**
+  (`navigateTo`, `widget.js`):
+  - **Same page** (same origin + pathname, maybe a different `#hash`) — no
+    reload. Just sets `window.location.hash`, so the browser jumps there
+    natively and the chat window is untouched.
+  - **A different page** — there's no way to keep this page's JS (and with
+    it, the widget) alive across a real navigation, so before navigating,
+    `saveOpenState` persists `{conversationId}` to `sessionStorage` (keyed
+    per client, not localStorage — it should survive this same-tab
+    navigation but not linger once the tab closes). On the destination
+    page, `init()` reads that (`readOpenState`, captured *before*
+    `buildUI()` runs — see the note below) and `restoreOpenState` reopens
+    the widget straight back into the same conversation, full transcript
+    replayed via the normal history-fetch path. That's what "keeping the
+    chat open" means across an actual page load: it doesn't survive in
+    memory, it reopens itself immediately after landing.
+  - State is kept live continuously, not just at click time: `saveOpenState`
+    also runs on every `showView` and `toggleOpen` call, so it reflects
+    whatever's actually open (and clears itself if the visitor closes the
+    widget, or navigates within it to Home/Messages/Help) — a *later*,
+    unrelated link on the destination page still reopens the same
+    conversation, matching how persistent chat widgets like Intercom behave
+    rather than a one-shot "only this specific click counts" rule.
+  - **Ordering pitfall that broke this once:** `buildUI()` calls
+    `showView("home")` to set up its default view, and since `showView`
+    itself calls `saveOpenState`, that fired with `currentView` still
+    `"home"` — clearing the very sessionStorage key `restoreOpenState`
+    needed, before it ever got a chance to read it. Fixed by reading it
+    (`readOpenState`) *before* `buildUI()` runs and passing that captured
+    value into `restoreOpenState` explicitly, rather than having it
+    re-read a key `buildUI`'s own side effects had already wiped.
 
 ### The Agent Desk (`/app.html`)
 

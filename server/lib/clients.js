@@ -8,6 +8,8 @@ const CLIENT_KEY_PREFIX = "chatbot:client:";
 const CLIENT_INDEX_KEY = "chatbot:client-index";
 
 const MAX_QUICK_REPLIES = 4;
+const MAX_PAGES = 12;
+const MAX_PAGE_LABEL_LENGTH = 60;
 
 // Deliberately generic -- greeting, what they sell, price, how to reach a
 // human. These read sensibly for a pizzeria, a SaaS product or a gym alike,
@@ -49,6 +51,25 @@ function sanitizeQuickReplies(replies) {
   for (let i = 0; i < MAX_QUICK_REPLIES; i++) {
     const raw = typeof list[i] === "string" ? list[i].trim().slice(0, 60) : "";
     out.push(raw || DEFAULT_QUICK_REPLIES[i]);
+  }
+  return out;
+}
+
+// Named links to specific pages/sections of the business's own site (e.g.
+// "Pricing" -> https://acme.com/pricing#plans), fed to the model so it can
+// offer clickable navigation buttons instead of just describing where
+// something is (see NAV_OPTIONS_MARKER in lib/sarvam.js). Same http(s)-only
+// rule as avatarUrl/website -- these end up both in the model's prompt and,
+// verbatim, in an <a>-like click target in the widget.
+function sanitizePages(pages) {
+  const list = Array.isArray(pages) ? pages : [];
+  const out = [];
+  for (const p of list) {
+    if (!p || typeof p !== "object") continue;
+    const label = typeof p.label === "string" ? p.label.trim().slice(0, MAX_PAGE_LABEL_LENGTH) : "";
+    const url = sanitizeUrl(p.url);
+    if (label && url) out.push({ label, url });
+    if (out.length >= MAX_PAGES) break;
   }
   return out;
 }
@@ -214,6 +235,11 @@ async function upsertClient(config) {
     // the same rejection.
     website:
       config.website !== undefined ? sanitizeUrl(config.website) : existing.website ?? "",
+    // Named page/section links the bot can offer as clickable navigation
+    // buttons -- see sanitizePages above and NAV_OPTIONS_MARKER in
+    // lib/sarvam.js. Never rendered directly; only ever surfaced through the
+    // model choosing one of these verbatim.
+    pages: config.pages !== undefined ? sanitizePages(config.pages) : existing.pages ?? [],
     quickReplies:
       config.quickReplies !== undefined
         ? sanitizeQuickReplies(config.quickReplies)
