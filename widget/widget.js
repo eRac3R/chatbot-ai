@@ -393,7 +393,7 @@
   // (conversationTempLocked). Called whenever any of those change while the
   // chat view is showing. There's no button here to drive anymore -- a
   // human handoff is now something the bot itself offers/detects in
-  // conversation (see AGENT_HANDOFF_MARKER in server/lib/gemini.js), not
+  // conversation (see AGENT_HANDOFF_MARKER in server/lib/sarvam.js), not
   // something the visitor triggers by tapping something.
   //
   // Only conversationLocked disables the composer -- a paused conversation

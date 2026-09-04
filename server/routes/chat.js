@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { getClient, getPublicClient } = require("../lib/clients");
-const { getChatReply, getSuggestedReplies, AGENT_HANDOFF_MARKER } = require("../lib/gemini");
+const { getChatReply, getSuggestedReplies, AGENT_HANDOFF_MARKER } = require("../lib/sarvam");
 const {
   isValidSessionId,
   isValidVisitorId,
@@ -28,7 +28,7 @@ const MAX_SUGGESTION_TURNS = 3;
 // visitor's clearly settled into a real conversation, the bot mentions the
 // option itself, once, appended to its own reply. The actual handoff is
 // separately triggered by the model emitting AGENT_HANDOFF_MARKER (see
-// buildSystemPrompt in lib/gemini.js) whenever it judges the visitor is
+// buildSystemPrompt in lib/sarvam.js) whenever it judges the visitor is
 // asking for or accepting a human -- which can fire on any turn, not just
 // this one; this constant only controls the proactive nudge.
 const LIVE_AGENT_NUDGE_TURN = 4;

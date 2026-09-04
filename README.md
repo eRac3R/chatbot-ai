@@ -1,7 +1,7 @@
 # chatbot-ai
 
 A plug-and-play AI chat widget (like Tawk.to) that answers visitors' questions
-about a business's product, powered by Google Gemini (free tier). One `<script>` tag embeds it on
+about a business's product, powered by Sarvam AI. One `<script>` tag embeds it on
 any website; each business gets its own knowledge base (product info + FAQs).
 
 ## How it fits together
@@ -169,8 +169,8 @@ follow-up suggestions the visitor can tap instead of typing — e.g. after
 "we ship within the US", a suggestion might be "Do you ship to Canada?".
 These render the same way as the quick-reply chips, right under the bot's
 message, and tapping one sends it and clears the set. Implementation notes:
-- `getSuggestedReplies` (`server/lib/gemini.js`) is a second, separate
-  Gemini call, deliberately isolated from `getChatReply` — if it fails or
+- `getSuggestedReplies` (`server/lib/sarvam.js`) is a second, separate
+  Sarvam call, deliberately isolated from `getChatReply` — if it fails or
   returns unparseable output, suggestions are silently empty rather than
   ever affecting the real reply. It runs concurrently with the reply call
   (`Promise.all` in `routes/chat.js`), so it costs no extra latency.
@@ -266,7 +266,7 @@ is the Agent Desk (see below).
 bot itself offers and recognizes it, the way an actual staff member would,
 rather than a visitor having to notice and tap a separate UI element.
 - The model appends a fixed literal token, `AGENT_HANDOFF_MARKER`
-  (`[[ROUTE_TO_AGENT]]`, `lib/gemini.js`), to its own reply whenever a rule
+  (`[[ROUTE_TO_AGENT]]`, `lib/sarvam.js`), to its own reply whenever a rule
   in `buildSystemPrompt` decides the visitor is asking for or accepting a
   human — either an explicit ask at any point ("can I talk to a person"),
   or agreeing after being offered. This can fire on turn one just as
@@ -301,14 +301,14 @@ The same actions also exist under `/api/admin/sessions/:id/*`
 support — those reach any client, so they're for us, not for customers.
 
 Once an agent actually joins (`assignAgent`), `POST /api/chat` stops calling
-Gemini for that session and returns `{pending: true, agent}`; the visitor's
+Sarvam for that session and returns `{pending: true, agent}`; the visitor's
 widget swaps the header and message avatars to the agent's name/photo and
 waits for their reply via polling. Bot messages keep the bot's avatar, so
 the history stays readable as a mixed conversation.
 
 When control is released, the bot picks up with the agent's messages in its
 context. Those are labelled `(human agent NAME):` in the history
-(`sessions.js`) and `gemini.js` has a matching rule telling the model to
+(`sessions.js`) and `sarvam.js` has a matching rule telling the model to
 treat them as authoritative — without it the model reads them as its own
 output and its "never state anything outside the business info" rule makes
 it *deny* things a colleague just promised (it told a visitor "I don't offer
@@ -501,8 +501,8 @@ cp .env.example .env
 ```
 
 Edit `.env`:
-- `GEMINI_API_KEY` — get a free one at https://aistudio.google.com/apikey
-  (no credit card required)
+- `SARVAM_API_KEY` — sign up at https://dashboard.sarvam.ai and create a key
+  under API Keys (new accounts get free credits, no card required to start)
 - `ADMIN_KEY` — set this to a long random string (used to protect the admin
   panel/API)
 
@@ -568,8 +568,12 @@ Steps:
    required) and copy its **REST URL** and **REST TOKEN**.
 2. `vercel` CLI (`npm i -g vercel`, then `vercel`) or connect the repo at
    vercel.com — either way, add these environment variables in the Vercel
-   project settings: `GEMINI_API_KEY`, `ADMIN_KEY`, `UPSTASH_REDIS_REST_URL`,
-   `UPSTASH_REDIS_REST_TOKEN` (same values as your local `.env`).
+   project settings: `SARVAM_API_KEY`, `ADMIN_KEY`, `SESSION_SECRET`,
+   `UPSTASH_REDIS_REST_URL`, `UPSTASH_REDIS_REST_TOKEN` (same values as your
+   local `.env`). `SESSION_SECRET` in particular is easy to miss since local
+   dev works fine without it (see The Agent Desk above) — set it explicitly
+   in production so rotating `ADMIN_KEY` later doesn't also sign out every
+   workspace login.
 3. Deploy. Your Agent Desk and widget are now at
    `https://your-project.vercel.app/app.html` and
    `https://your-project.vercel.app/widget.js` — swap that domain into every

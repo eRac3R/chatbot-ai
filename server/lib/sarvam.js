@@ -1,25 +1,52 @@
-const { GoogleGenAI } = require("@google/genai");
+// Sarvam AI's chat completions endpoint is OpenAI-compatible, so this is a
+// plain fetch() call rather than a vendor SDK -- one dependency less than
+// the Gemini integration this replaced, and easy to swap again later if
+// needed (everything provider-specific lives in this one file).
+const SARVAM_API_URL = "https://api.sarvam.ai/v1/chat/completions";
 
-// The model appends this exact token to its own reply when it decides the
-// visitor should be handed to a human (see the RULES entry below) --
-// routes/chat.js strips it back out before the visitor ever sees it and
-// treats its presence as the trigger to call requestAgent(). There's no UI
-// button for this anymore; the model's own read of the conversation -- an
+// The model itself appends this exact token to its own reply when it
+// decides the visitor should be handed to a human (see the RULES entry
+// below) -- routes/chat.js strips it back out before the visitor ever sees
+// it and treats its presence as the trigger to call requestAgent(). There's
+// no UI button for this; the model's own read of the conversation -- an
 // explicit ask, or agreeing after chat.js's own nudge a few turns in -- is
 // what decides it, the same way a real staff member would notice.
 const AGENT_HANDOFF_MARKER = "[[ROUTE_TO_AGENT]]";
 
-let client = null;
-function getClient() {
-  if (!process.env.GEMINI_API_KEY) {
+function apiKey() {
+  if (!process.env.SARVAM_API_KEY) {
     throw new Error(
-      "GEMINI_API_KEY is not set. Add it to your .env file (see .env.example)."
+      "SARVAM_API_KEY is not set. Add it to your .env file (see .env.example)."
     );
   }
-  if (!client) {
-    client = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+  return process.env.SARVAM_API_KEY;
+}
+
+async function callSarvam(messages, { maxTokens, temperature }) {
+  const model = process.env.SARVAM_MODEL || "sarvam-105b-conversations";
+  const response = await fetch(SARVAM_API_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "api-subscription-key": apiKey(),
+    },
+    body: JSON.stringify({
+      model,
+      messages,
+      max_tokens: maxTokens,
+      temperature: temperature,
+    }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`Sarvam API error ${response.status}: ${body.slice(0, 300)}`);
   }
-  return client;
+
+  const data = await response.json();
+  return data.choices && data.choices[0] && data.choices[0].message
+    ? data.choices[0].message.content || ""
+    : "";
 }
 
 function buildSystemPrompt(clientConfig) {
@@ -60,15 +87,18 @@ function buildSystemPrompt(clientConfig) {
   ].join("\n");
 }
 
-// history entries use {role: "user"|"assistant", content}; Gemini wants
-// {role: "user"|"model", parts: [{text}]}.
-function toGeminiContents(history, userMessage) {
-  const contents = history.map((m) => ({
-    role: m.role === "assistant" ? "model" : "user",
-    parts: [{ text: m.content }],
-  }));
-  contents.push({ role: "user", parts: [{ text: userMessage }] });
-  return contents;
+// history entries use {role: "user"|"assistant", content}; Sarvam's chat
+// completions API is OpenAI-shaped, so those roles carry straight over --
+// unlike Gemini, no "assistant" -> "model" rename needed. The system prompt
+// is just another message in the array (role "system"), not a separate
+// config field.
+function toSarvamMessages(systemPrompt, history, userMessage) {
+  const messages = [{ role: "system", content: systemPrompt }];
+  history.forEach((m) => {
+    messages.push({ role: m.role === "assistant" ? "assistant" : "user", content: m.content });
+  });
+  messages.push({ role: "user", content: userMessage });
+  return messages;
 }
 
 // Short, tappable follow-up suggestions ("smart replies") shown as chips
@@ -77,9 +107,6 @@ function toGeminiContents(history, userMessage) {
 // or return garbage without ever touching the actual reply, and the two run
 // concurrently (see routes/chat.js) so it costs no extra latency.
 async function getSuggestedReplies({ clientConfig, history, userMessage }) {
-  const ai = getClient();
-  const model = process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
-
   const prompt = [
     `You suggest short reply options for a visitor chatting with ${clientConfig.botName || "a support bot"} on ${clientConfig.id}'s website.`,
     `Given the conversation so far, suggest up to 2 short, natural follow-up messages the VISITOR might send next -- ideally under 8 words.`,
@@ -95,14 +122,13 @@ async function getSuggestedReplies({ clientConfig, history, userMessage }) {
   ].join("\n");
 
   try {
-    const response = await ai.models.generateContent({
-      model,
-      contents: toGeminiContents(history, userMessage),
-      config: { systemInstruction: prompt, maxOutputTokens: 100 },
+    const text = await callSarvam(toSarvamMessages(prompt, history, userMessage), {
+      maxTokens: 100,
+      temperature: 0.2,
     });
-    const text = (response.text || "").trim();
-    const match = text.match(/\[[\s\S]*\]/);
-    const parsed = JSON.parse(match ? match[0] : text);
+    const trimmed = (text || "").trim();
+    const match = trimmed.match(/\[[\s\S]*\]/);
+    const parsed = JSON.parse(match ? match[0] : trimmed);
     if (!Array.isArray(parsed)) return [];
     return parsed
       .filter((s) => typeof s === "string" && s.trim())
@@ -114,22 +140,10 @@ async function getSuggestedReplies({ clientConfig, history, userMessage }) {
 }
 
 async function getChatReply({ clientConfig, history, userMessage }) {
-  const ai = getClient();
-  // "-lite" trades some quality for much lower latency (~1s vs ~20s in
-  // testing against the full "-latest" flash model) -- worth it for a chat
-  // widget answering straightforward product questions.
-  const model = process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
-
-  const response = await ai.models.generateContent({
-    model,
-    contents: toGeminiContents(history, userMessage),
-    config: {
-      systemInstruction: buildSystemPrompt(clientConfig),
-      maxOutputTokens: 500,
-    },
+  return callSarvam(toSarvamMessages(buildSystemPrompt(clientConfig), history, userMessage), {
+    maxTokens: 500,
+    temperature: 0.2,
   });
-
-  return response.text || "";
 }
 
 module.exports = { getChatReply, getSuggestedReplies, buildSystemPrompt, AGENT_HANDOFF_MARKER };

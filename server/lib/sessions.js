@@ -251,7 +251,7 @@ async function appendMessage(session, { role, content, sender }) {
 // Messages a human agent wrote are labelled inline, because otherwise the
 // model reads them as its own past output and its "never state anything
 // outside the business info" rule makes it contradict things a colleague
-// already promised the visitor. gemini.js has a matching rule telling it to
+// already promised the visitor. sarvam.js has a matching rule telling it to
 // treat these as authoritative.
 function toLlmHistory(session) {
   return session.messages.slice(-LLM_MAX_MESSAGES).map((m) => ({
