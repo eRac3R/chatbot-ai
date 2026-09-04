@@ -174,6 +174,14 @@ message, and tapping one sends it and clears the set. Implementation notes:
   returns unparseable output, suggestions are silently empty rather than
   ever affecting the real reply. It runs concurrently with the reply call
   (`Promise.all` in `routes/chat.js`), so it costs no extra latency.
+- Every Sarvam call retries once on a transient failure (rate limit, a
+  momentary 5xx, a network blip) before giving up — seen in practice
+  running live: an otherwise-healthy conversation occasionally has one
+  message fail outright while everything around it works fine, consistent
+  with a passing hiccup rather than a real config problem. A genuine 4xx
+  (bad key, malformed request) is never retried, since retrying reproduces
+  the same failure. One retry, ~400ms delay — enough to ride out a blip
+  without meaningfully slowing down the one message that hits it.
 - Capped to a conversation's **first 3 user messages**
   (`MAX_SUGGESTION_TURNS`) — past that, the extra call is skipped
   entirely (not just hidden client-side) to avoid unnecessary cost in a

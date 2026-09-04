@@ -22,7 +22,15 @@ function apiKey() {
   return process.env.SARVAM_API_KEY;
 }
 
-async function callSarvam(messages, { maxTokens, temperature }) {
+const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 2; // one retry -- a chat widget can't afford much added latency
+const RETRY_DELAY_MS = 400;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function callSarvamOnce(messages, { maxTokens, temperature }) {
   const model = process.env.SARVAM_MODEL || "sarvam-105b-conversations";
   const response = await fetch(SARVAM_API_URL, {
     method: "POST",
@@ -40,13 +48,38 @@ async function callSarvam(messages, { maxTokens, temperature }) {
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    throw new Error(`Sarvam API error ${response.status}: ${body.slice(0, 300)}`);
+    const err = new Error(`Sarvam API error ${response.status}: ${body.slice(0, 300)}`);
+    err.status = response.status;
+    throw err;
   }
 
   const data = await response.json();
   return data.choices && data.choices[0] && data.choices[0].message
     ? data.choices[0].message.content || ""
     : "";
+}
+
+// A single retry for transient failures -- rate limits, momentary 5xx,
+// network blips (fetch itself throwing, no err.status). NOT for 4xx errors
+// like a bad key or malformed request; retrying those just wastes time
+// producing the exact same failure. Seen in practice on Vercel: an
+// otherwise-healthy conversation occasionally has one message fail outright
+// while every message around it works fine -- consistent with a passing
+// hiccup rather than anything actually wrong with the config.
+async function callSarvam(messages, options) {
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      return await callSarvamOnce(messages, options);
+    } catch (err) {
+      lastErr = err;
+      const retryable = err.status === undefined || RETRYABLE_STATUS.has(err.status);
+      if (!retryable || attempt === MAX_ATTEMPTS) throw err;
+      console.error(`Sarvam call failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying:`, err.message);
+      await sleep(RETRY_DELAY_MS);
+    }
+  }
+  throw lastErr;
 }
 
 function buildSystemPrompt(clientConfig) {
