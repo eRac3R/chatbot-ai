@@ -4,7 +4,7 @@
   "welcomeMessage": "Hi! I'm Nova, ask me anything about BrightBrew Coffee.",
   "brandColor": "#6366f1",
   "tone": "warm, upbeat, and concise",
-  "businessInfo": "BrightBrew Coffee is a specialty coffee subscription service. We ship freshly roasted beans every 2 weeks, sourced directly from small farms in Colombia, Ethiopia, and Guatemala. Plans start at $16/month for a 12oz bag, with options for whole bean or ground. Free shipping on all US orders. You can pause, skip, or cancel your subscription anytime from your account page, no fees. We also sell brewing equipment: pour-over kits ($35), French presses ($28), and burr grinders ($60-120).",
+  "businessInfo": "BrightBrew Coffee is a specialty coffee subscription service, sourcing beans directly from small farms in Colombia, Ethiopia, and Guatemala and roasting them fresh within days of your order.\n\nPlans: Starter ($16/month, one 12oz bag every 2 weeks, whole bean or ground), Origin Trio ($42/month, one bag each from Colombia, Ethiopia, and Guatemala), and Gift a Bag ($18 one-time, a single bag with a welcome card, no subscription needed). You can pause, skip, switch plans, or cancel your subscription anytime from Account > Subscription, no fees, effective end of the current billing cycle.\n\nShipping: free on every US order, no minimum, 3-5 business days standard delivery. We don't ship internationally yet -- it's on our roadmap.\n\nReturns: 100% satisfaction guarantee on your first bag -- contact support within 30 days of delivery for a full refund. Damaged or wrong orders get a free replacement or refund, just include your order number.\n\nGear: pour-over kits ($35, dripper + filters + starter guide), French presses ($28, 34oz borosilicate glass with stainless mesh), and burr grinders ($60-120, 15 grind settings).\n\nSupport: email support@brightbrew.example (reply within one business day) or use the live chat -- hours are Monday-Friday 9am-6pm ET, messages outside those hours get a reply the next business day.",
   "faqs": [
     {
       "question": "How do I cancel my subscription?",
@@ -17,7 +17,23 @@
     {
       "question": "What if I don't like the coffee?",
       "answer": "We offer a 100% satisfaction guarantee on your first bag. Contact support@brightbrew.example within 30 days for a full refund."
+    },
+    {
+      "question": "Can I send coffee as a gift?",
+      "answer": "Yes! The Gift a Bag plan is a single 12oz bag plus a welcome card for $18, one-time, no subscription required."
+    },
+    {
+      "question": "How do I contact support?",
+      "answer": "Email support@brightbrew.example or chat with us right here -- Mon-Fri 9am-6pm ET, replies within one business day."
     }
   ],
-  "updatedAt": "2026-08-28T00:00:00.000Z"
+  "pages": [
+    { "label": "Subscription plans", "url": "https://chatbot-ai-pi-pearl.vercel.app/demo.html#plans" },
+    { "label": "Brewing gear", "url": "https://chatbot-ai-pi-pearl.vercel.app/demo.html#gear" },
+    { "label": "FAQ", "url": "https://chatbot-ai-pi-pearl.vercel.app/demo.html#faq" },
+    { "label": "Our story", "url": "https://chatbot-ai-pi-pearl.vercel.app/demo.html#story" },
+    { "label": "Shipping & Returns", "url": "https://chatbot-ai-pi-pearl.vercel.app/demo-shipping.html" },
+    { "label": "Contact", "url": "https://chatbot-ai-pi-pearl.vercel.app/demo-contact.html" }
+  ],
+  "updatedAt": "2026-09-04T00:00:00.000Z"
 }
