@@ -271,6 +271,14 @@ rather than a visitor having to notice and tap a separate UI element.
   human — either an explicit ask at any point ("can I talk to a person"),
   or agreeing after being offered. This can fire on turn one just as
   easily as turn ten; it isn't gated by anything below.
+- **A third way it comes up, besides an explicit ask or the scheduled
+  nudge below: whenever the bot doesn't know something.** The grounding
+  rule used to end with "suggest the visitor contact the business
+  directly" — which sent people away from a conversation that could
+  already solve their problem, to some other channel entirely. It now
+  offers a live agent instead ("I don't have that — want me to get someone
+  who can help?"), in the same chat, which the handoff rule above then
+  picks up if they say yes.
 - **A repeating proactive nudge**, separately: once a visitor's sent
   `LIVE_AGENT_NUDGE_START_TURN` (4) messages without asking, `routes/chat.js`
   appends *"If you'd prefer talking to a live support agent, feel free to
