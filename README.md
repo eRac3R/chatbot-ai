@@ -262,22 +262,37 @@ visitor buckets.
 Two ways a conversation ends up in front of a human. The agent-facing side
 is the Agent Desk (see below).
 
-**Visitor-requested.** A "🙋 Talk to a live agent" button is shown in the
-chat while the AI is still handling things. Tapping it calls
-`POST /api/sessions/:id/request-agent` (`{clientId}`, no admin key --
-this is visitor-facing), which:
-- Flags the conversation `agentRequested: true`.
-- Posts a canned message: *"Connecting you with a member of our team —
-  feel free to keep typing any questions here, they'll see the whole
-  conversation as soon as they join."*
-- **Stops the AI immediately** — `POST /api/chat` treats `agentRequested`
-  the same as an agent already being attached (`agent || agentRequested`)
-  and returns `{pending: true}` without calling Gemini, even before any
-  specific agent has actually joined. The visitor can keep typing; it's
-  just queued for whoever picks it up.
-- The widget reflects this with a header status of "Connecting to an
-  agent…", and hides the request button (`updateChatStatusUI` in
-  `widget.js`) so it can't be tapped twice.
+**Visitor-requested.** There is no "talk to a human" button anymore — the
+bot itself offers and recognizes it, the way an actual staff member would,
+rather than a visitor having to notice and tap a separate UI element.
+- The model appends a fixed literal token, `AGENT_HANDOFF_MARKER`
+  (`[[ROUTE_TO_AGENT]]`, `lib/gemini.js`), to its own reply whenever a rule
+  in `buildSystemPrompt` decides the visitor is asking for or accepting a
+  human — either an explicit ask at any point ("can I talk to a person"),
+  or agreeing after being offered. This can fire on turn one just as
+  easily as turn ten; it isn't gated by anything below.
+- **A one-time proactive nudge**, separately: once a visitor's sent
+  `LIVE_AGENT_NUDGE_TURN` (4) messages without asking, `routes/chat.js`
+  appends *"If you'd prefer talking to a live support agent, feel free to
+  let me know!"* to that reply — plain string concatenation, not something
+  the model decides, so it's guaranteed to appear exactly once, worded
+  exactly the same way, and never on the same turn as an actual handoff
+  (that would be a strange thing to say in the same breath as "connecting
+  you now").
+- `routes/chat.js` checks the AI's raw reply for the marker, strips it
+  before the visitor ever sees the text (`rawReply.split(marker).join("")`),
+  and if present calls `requestAgent(session)` — the exact same function
+  the old button used to call directly, just triggered by the model's
+  judgment instead of a click. Everything downstream is unchanged: flags
+  `agentRequested: true`, posts the canned *"Connecting you with a member
+  of our team…"* message, and `POST /api/chat` starts returning
+  `{pending: true}` for that session from the next message on.
+- One ordering detail worth knowing if you're touching this code: the
+  handoff response returns `seq: botMessage.seq` (the AI's own stripped
+  reply), not the later `session.seq` that includes the canned message
+  `requestAgent` appends right after — the widget uses that value as its
+  low-water mark for what it's already shown, and setting it too high
+  would make the widget's next poll skip the canned message entirely.
 
 **Operator-initiated.** An agent picks a conversation up from the Agent
 Desk, which calls the workspace API (`/api/workspace/sessions/:id/claim`).

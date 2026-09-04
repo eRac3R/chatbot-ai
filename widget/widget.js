@@ -317,11 +317,6 @@
       ".cw-dot:nth-child(2){animation-delay:.16s}.cw-dot:nth-child(3){animation-delay:.32s}" +
       "@keyframes cw-bounce{0%,60%,100%{transform:translateY(0);opacity:.5}30%{transform:translateY(-5px);opacity:1}}" +
 
-      /* talk-to-a-human bar, shown above the composer while the AI is still handling things */
-      "#cw-agent-request-bar{display:flex;justify-content:center;padding:8px 14px;background:#fff;border-top:1px solid #f0f1f4}" +
-      "#cw-agent-request-btn{background:none;border:1.5px solid " + rgba(brand, 0.35) + ";color:" + shade(brand, -0.25) + ";font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:7px 14px;border-radius:16px;transition:all .15s ease}" +
-      "#cw-agent-request-btn:hover{background:" + rgba(brand, 0.08) + ";border-color:" + brand + "}" +
-
       /* composer */
       "#cw-inputbar{display:flex;gap:8px;padding:12px 14px;border-top:1px solid #ecedf1;flex-shrink:0;background:#fff;align-items:flex-end}" +
       "#cw-input{flex:1;border:1.5px solid #e2e4ea;border-radius:22px;padding:10px 15px;font-size:14.5px;outline:none;resize:none;max-height:96px;font-family:inherit;line-height:1.45;color:#1a1c22;transition:border-color .15s ease,box-shadow .15s ease;background:#fafbfc}" +
@@ -391,12 +386,15 @@
     els.headerAvatar = fresh;
   }
 
-  // Status line + "talk to a live agent" bar + composer lock, all driven by
-  // the same four bits of state: is an agent attached (currentResponder),
-  // has one been requested but not joined yet (conversationAgentRequested),
-  // has the conversation permanently ended (conversationLocked), has it
-  // temporarily paused (conversationTempLocked). Called whenever any of
-  // those change while the chat view is showing.
+  // Status line + composer lock, driven by the same four bits of state: is
+  // an agent attached (currentResponder), has one been requested but not
+  // joined yet (conversationAgentRequested), has the conversation
+  // permanently ended (conversationLocked), has it temporarily paused
+  // (conversationTempLocked). Called whenever any of those change while the
+  // chat view is showing. There's no button here to drive anymore -- a
+  // human handoff is now something the bot itself offers/detects in
+  // conversation (see AGENT_HANDOFF_MARKER in server/lib/gemini.js), not
+  // something the visitor triggers by tapping something.
   //
   // Only conversationLocked disables the composer -- a paused conversation
   // is reopened by typing into it, so it has to stay usable. That's also
@@ -415,10 +413,6 @@
       els.statusText.textContent = "Online";
     }
     els.status.style.display = "";
-
-    var showRequestBtn =
-      !conversationLocked && !conversationTempLocked && !conversationAgentRequested && !currentResponder;
-    els.agentRequestBar.style.display = showRequestBtn ? "flex" : "none";
 
     els.input.disabled = conversationLocked;
     els.send.disabled = conversationLocked || sendInFlight;
@@ -473,10 +467,6 @@
     // --- chat view: an open conversation ---
     var messages = el("div", { id: "cw-messages" });
 
-    var agentRequestBtn = el("button", { id: "cw-agent-request-btn", type: "button", text: "🙋 Talk to a live agent" });
-    agentRequestBtn.addEventListener("click", requestLiveAgent);
-    var agentRequestBar = el("div", { id: "cw-agent-request-bar" }, [agentRequestBtn]);
-
     var input = el("textarea", { id: "cw-input", rows: "1", placeholder: "Type a message…" });
     var send = el("button", { id: "cw-send", "aria-label": "Send" });
     send.innerHTML = svg("send", contrastText(config.brandColor), true);
@@ -485,7 +475,7 @@
     footerHome.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + ICONS.home + "</svg>";
     footerHome.addEventListener("click", function () { showView("home"); });
     var footer = el("div", { id: "cw-footer" }, [footerHome]);
-    var chatView = el("div", { class: "cw-view", "data-view": "chat" }, [messages, agentRequestBar, inputBar, footer]);
+    var chatView = el("div", { class: "cw-view", "data-view": "chat" }, [messages, inputBar, footer]);
 
     // --- home view ---
     var homeList = el("div", { id: "cw-home-list" });
@@ -526,7 +516,6 @@
       tabbar: tabbar, tabs: { home: tabHome, messages: tabMessages, faq: tabHelp },
       tabBadge: tabBadge,
       homeList: homeList, messagesList: messagesList, faqList: faqList,
-      agentRequestBar: agentRequestBar,
     };
 
     buildHome();
@@ -1027,36 +1016,6 @@
       .finally(function () {
         sendInFlight = false;
         if (currentView === "chat") updateChatStatusUI();
-      });
-  }
-
-  // "🙋 Talk to a live agent" -- the visitor's side of asking for human
-  // help. The AI stops responding to this conversation immediately (server
-  // enforces this regardless of what the widget does), well before any
-  // specific agent actually joins.
-  function requestLiveAgent() {
-    if (!currentConversationId || conversationLocked || conversationAgentRequested || currentResponder) return;
-    fetch(API_BASE + "/api/sessions/" + encodeURIComponent(currentConversationId) + "/request-agent", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ clientId: clientId }),
-    })
-      .then(function (r) {
-        return r.json().then(function (data) {
-          if (!r.ok) throw new Error(data.error || "Could not connect to an agent");
-          return data;
-        });
-      })
-      .then(function (data) {
-        clearReplyChips();
-        applyConversationState(data);
-        fetchConversations();
-        // The canned "connecting…" message was appended server-side; pull it
-        // down the same way any other new message arrives.
-        return fetchOpenConversationMessages(false);
-      })
-      .catch(function (err) {
-        addMessage("bot", "Sorry, I couldn't connect you to an agent: " + err.message);
       });
   }
 

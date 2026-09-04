@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { getClient, getPublicClient } = require("../lib/clients");
-const { getChatReply, getSuggestedReplies } = require("../lib/gemini");
+const { getChatReply, getSuggestedReplies, AGENT_HANDOFF_MARKER } = require("../lib/gemini");
 const {
   isValidSessionId,
   isValidVisitorId,
@@ -23,6 +23,17 @@ const router = express.Router();
 // generating them entirely (saves a model call and avoids clutter in a
 // longer, more specific conversation).
 const MAX_SUGGESTION_TURNS = 3;
+
+// There's no "talk to a live agent" button anymore -- instead, once a
+// visitor's clearly settled into a real conversation, the bot mentions the
+// option itself, once, appended to its own reply. The actual handoff is
+// separately triggered by the model emitting AGENT_HANDOFF_MARKER (see
+// buildSystemPrompt in lib/gemini.js) whenever it judges the visitor is
+// asking for or accepting a human -- which can fire on any turn, not just
+// this one; this constant only controls the proactive nudge.
+const LIVE_AGENT_NUDGE_TURN = 4;
+const LIVE_AGENT_NUDGE_SENTENCE =
+  "If you'd prefer talking to a live support agent, feel free to let me know!";
 
 // Very small fixed-window rate limiter per session, to keep the demo/API
 // from being trivially hammered. Not a substitute for a real gateway limiter.
@@ -229,13 +240,45 @@ router.post("/chat", async (req, res) => {
     const turnNumber = session.messages.filter((m) => m.role === "user").length;
     const wantSuggestions = turnNumber <= MAX_SUGGESTION_TURNS;
 
-    const [reply, suggestions] = await Promise.all([
+    const [rawReply, suggestions] = await Promise.all([
       getChatReply({ clientConfig, history, userMessage: message }),
       wantSuggestions
         ? getSuggestedReplies({ clientConfig, history, userMessage: message })
         : Promise.resolve([]),
     ]);
+
+    // The model hands off by appending AGENT_HANDOFF_MARKER to its own
+    // reply -- strip it out before the visitor ever sees the text, and
+    // treat its presence as the actual trigger, not anything typed here.
+    const routingToAgent = rawReply.includes(AGENT_HANDOFF_MARKER);
+    let reply = rawReply.split(AGENT_HANDOFF_MARKER).join("").trim();
+
+    // Mention the option once, right as a visitor settles into a real
+    // conversation -- never on the same turn we're already handing off,
+    // that would be a strange thing to say in the same breath as "connecting
+    // you now."
+    if (!routingToAgent && turnNumber === LIVE_AGENT_NUDGE_TURN) {
+      reply = reply + "\n\n" + LIVE_AGENT_NUDGE_SENTENCE;
+    }
+
     const botMessage = await appendMessage(session, { role: "assistant", content: reply });
+
+    if (routingToAgent) {
+      await requestAgent(session);
+      return res.json({
+        reply,
+        sessionId,
+        // botMessage.seq, not the later session.seq -- requestAgent() just
+        // appended its own canned "connecting you" message after this one,
+        // and that arrives via the next poll rather than inline here (same
+        // pattern as everywhere else a canned message follows a visitor
+        // action). Advancing lastSeq past it now would make the widget
+        // skip it entirely on the next poll.
+        seq: botMessage.seq,
+        suggestions: [],
+        agentRequested: true,
+      });
+    }
 
     res.json({ reply, sessionId, seq: botMessage.seq, suggestions });
   } catch (err) {
