@@ -208,6 +208,32 @@ laptop doesn't clear the badge on their phone. Fixing that would mean
 syncing read-state through the server too; not done, flagged here rather
 than silently left as a surprise.
 
+### Polling and message dedup
+
+While a conversation is open, the widget polls `GET /sessions/:id/messages`
+every `POLL_INTERVAL_MS` (4s) and shows anything with `seq > lastSeq`,
+bumping `lastSeq` as it goes — the same mechanism that picks up an agent's
+reply. `pollOnce` skips *starting* a new poll while a send is in flight
+(`sendInFlight`), so the visitor's own message doesn't get raced by a poll
+that begins after it.
+
+That guard alone isn't enough, though: a poll already in flight *before* the
+send began isn't stopped by it, since that only gates starting a new one.
+That poll's `since` value is captured in its URL before it's sent, so if the
+AI is slow enough (or erroring) that the poll's response doesn't land until
+*after* the visitor's message is already stored server-side, the response
+comes back looking like it contains a genuinely new message — and renders a
+second copy of something `submitText` already showed optimistically. Seen in
+practice: a visitor reported their own messages appearing twice, worse the
+slower or more error-prone the AI backend was — exactly the conditions that
+widen this window. `fetchOpenConversationMessages`'s response handler now
+also checks `sendInFlight` and bails out if a send is currently in progress,
+trusting `submitText`'s own completion handler (and the next poll tick) to
+reconcile state instead. Reproduced deterministically in testing by holding
+a poll's response open with Playwright's request interception until after a
+send had been stored, confirming both that the old code duplicated the
+message and that this fix doesn't.
+
 ### Chat history and cross-device continuity
 
 By default a visitor is identified by a random id kept in their browser's

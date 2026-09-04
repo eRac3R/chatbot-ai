@@ -909,6 +909,18 @@
       .then(function (r) { return r.ok ? r.json() : null; })
       .then(function (data) {
         if (!data || conversationId !== currentConversationId) return;
+        // A poll already in flight when the visitor hits send isn't stopped
+        // by pollOnce's sendInFlight check -- that only skips STARTING a new
+        // poll, not a response already on its way back. This poll's `since`
+        // was captured before the send began, so if the AI is slow (the
+        // window this needs to matter in is exactly when it's slow or
+        // erroring), the response can land after the visitor's own message
+        // is already stored server-side -- making it look "new" here and
+        // rendering it a second time, even though submitText already showed
+        // it optimistically. Bail out and let submitText's own completion
+        // handler reconcile state once it resolves; the next poll tick
+        // (4s later) picks up anything this one would have shown anyway.
+        if (sendInFlight) return;
         applyAgent(data.agent);
         applyConversationState(data);
         (data.messages || []).forEach(function (m) {
