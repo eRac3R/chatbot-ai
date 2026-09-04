@@ -271,14 +271,27 @@ rather than a visitor having to notice and tap a separate UI element.
   human — either an explicit ask at any point ("can I talk to a person"),
   or agreeing after being offered. This can fire on turn one just as
   easily as turn ten; it isn't gated by anything below.
-- **A one-time proactive nudge**, separately: once a visitor's sent
-  `LIVE_AGENT_NUDGE_TURN` (4) messages without asking, `routes/chat.js`
+- **A repeating proactive nudge**, separately: once a visitor's sent
+  `LIVE_AGENT_NUDGE_START_TURN` (4) messages without asking, `routes/chat.js`
   appends *"If you'd prefer talking to a live support agent, feel free to
   let me know!"* to that reply — plain string concatenation, not something
-  the model decides, so it's guaranteed to appear exactly once, worded
-  exactly the same way, and never on the same turn as an actual handoff
-  (that would be a strange thing to say in the same breath as "connecting
-  you now").
+  the model decides. It repeats every `LIVE_AGENT_NUDGE_REPEAT_EVERY` (2)
+  turns after that (4, 6, 8, …) for as long as the visitor keeps going
+  without asking, worded exactly the same way each time, and never on the
+  same turn as an actual handoff (that would be a strange thing to say in
+  the same breath as "connecting you now").
+- **The nudge is kept out of what the model sees in its own history.**
+  `appendMessage` (`lib/sessions.js`) takes an optional `historyContent`
+  distinct from the displayed `content`; `toLlmHistory` prefers it when
+  present. Without this, the model imitates its own past output — once the
+  nudge sentence had appeared in its history a couple of times, it started
+  echoing/repeating that exact phrase unprompted on *later* turns too, even
+  ones the deterministic logic never touched, compounding worse each time
+  it fired (confirmed while testing: by turn 8 or so, replies came back
+  with the sentence appended two or three times over). `chat.js` stores the
+  model's clean reply as `historyContent` and the nudge-appended version
+  (when due) as `content`, so the model's context never contains a copy of
+  its own nudge text to imitate.
 - `routes/chat.js` checks the AI's raw reply for the marker, strips it
   before the visitor ever sees the text (`rawReply.split(marker).join("")`),
   and if present calls `requestAgent(session)` — the exact same function

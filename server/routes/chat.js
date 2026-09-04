@@ -26,12 +26,17 @@ const MAX_SUGGESTION_TURNS = 3;
 
 // There's no "talk to a live agent" button anymore -- instead, once a
 // visitor's clearly settled into a real conversation, the bot mentions the
-// option itself, once, appended to its own reply. The actual handoff is
+// option itself, appended to its own reply: once at turn
+// LIVE_AGENT_NUDGE_START_TURN, then again every LIVE_AGENT_NUDGE_REPEAT_EVERY
+// turns after that (4, 6, 8, ... by default) -- a visitor who's still going
+// several messages later gets reminded again rather than the option only
+// ever being mentioned once and then forgotten. The actual handoff is
 // separately triggered by the model emitting AGENT_HANDOFF_MARKER (see
 // buildSystemPrompt in lib/sarvam.js) whenever it judges the visitor is
-// asking for or accepting a human -- which can fire on any turn, not just
-// this one; this constant only controls the proactive nudge.
-const LIVE_AGENT_NUDGE_TURN = 4;
+// asking for or accepting a human -- that can fire on any turn, unrelated
+// to these constants, which only control the proactive nudge.
+const LIVE_AGENT_NUDGE_START_TURN = 4;
+const LIVE_AGENT_NUDGE_REPEAT_EVERY = 2;
 const LIVE_AGENT_NUDGE_SENTENCE =
   "If you'd prefer talking to a live support agent, feel free to let me know!";
 
@@ -250,18 +255,36 @@ router.post("/chat", async (req, res) => {
     // The model hands off by appending AGENT_HANDOFF_MARKER to its own
     // reply -- strip it out before the visitor ever sees the text, and
     // treat its presence as the actual trigger, not anything typed here.
+    // cleanReply is what the model actually said, with neither the marker
+    // nor (below) the nudge sentence -- this, not the displayed text, is
+    // what goes into the model's own history (historyContent below).
     const routingToAgent = rawReply.includes(AGENT_HANDOFF_MARKER);
-    let reply = rawReply.split(AGENT_HANDOFF_MARKER).join("").trim();
+    const cleanReply = rawReply.split(AGENT_HANDOFF_MARKER).join("").trim();
+    let reply = cleanReply;
 
-    // Mention the option once, right as a visitor settles into a real
-    // conversation -- never on the same turn we're already handing off,
-    // that would be a strange thing to say in the same breath as "connecting
-    // you now."
-    if (!routingToAgent && turnNumber === LIVE_AGENT_NUDGE_TURN) {
+    // First mention right as a visitor settles into a real conversation,
+    // then a repeat reminder every LIVE_AGENT_NUDGE_REPEAT_EVERY turns for
+    // as long as they keep going without asking -- turns 4, 6, 8, ... by
+    // default. Never on the same turn we're already handing off, that would
+    // be a strange thing to say in the same breath as "connecting you now."
+    const turnsPastNudgeStart = turnNumber - LIVE_AGENT_NUDGE_START_TURN;
+    const dueForNudge =
+      turnsPastNudgeStart >= 0 && turnsPastNudgeStart % LIVE_AGENT_NUDGE_REPEAT_EVERY === 0;
+    if (!routingToAgent && dueForNudge) {
       reply = reply + "\n\n" + LIVE_AGENT_NUDGE_SENTENCE;
     }
 
-    const botMessage = await appendMessage(session, { role: "assistant", content: reply });
+    // historyContent is deliberately cleanReply, NOT the displayed `reply`
+    // -- if the nudge sentence itself goes into what the model sees back as
+    // its own past output, it starts imitating that pattern and repeating
+    // the sentence unprompted on later turns, compounding every time it
+    // fires again (confirmed: without this, by turn 8 or so replies come
+    // back with the nudge appended two or three times over).
+    const botMessage = await appendMessage(session, {
+      role: "assistant",
+      content: reply,
+      historyContent: cleanReply,
+    });
 
     if (routingToAgent) {
       await requestAgent(session);

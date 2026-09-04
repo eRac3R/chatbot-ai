@@ -26,7 +26,7 @@ const { redis, hasRedis } = require("./store");
 //                                // maybeAutoPauseIdleSession below) --
 //                                // visitor can reopen it just by sending a
 //                                // new message; any agent can then claim it
-//     messages: [ { seq, ts, role, content, sender? } ],
+//     messages: [ { seq, ts, role, content, sender?, historyContent? } ],
 //     updatedAt
 //   }
 //
@@ -229,7 +229,7 @@ async function createConversation(clientId, visitorId, ip) {
 
 // ---- messages ----
 
-async function appendMessage(session, { role, content, sender }) {
+async function appendMessage(session, { role, content, sender, historyContent }) {
   session.seq += 1;
   const message = {
     seq: session.seq,
@@ -238,6 +238,13 @@ async function appendMessage(session, { role, content, sender }) {
     content: content,
   };
   if (sender) message.sender = sender;
+  // Lets a caller store one thing for display and a different thing for
+  // what the model sees in its own history (see routes/chat.js's live-agent
+  // nudge). Needed because the model imitates its own past output -- once
+  // a fixed sentence has appeared in its history a couple of times, it
+  // starts echoing/repeating that phrase unprompted on later turns even
+  // when nothing in the current message calls for it.
+  if (historyContent !== undefined) message.historyContent = historyContent;
   session.messages.push(message);
   if (session.messages.length > MAX_MESSAGES) {
     session.messages = session.messages.slice(-MAX_MESSAGES);
@@ -256,7 +263,11 @@ async function appendMessage(session, { role, content, sender }) {
 function toLlmHistory(session) {
   return session.messages.slice(-LLM_MAX_MESSAGES).map((m) => ({
     role: m.role,
-    content: m.sender ? "(human agent " + m.sender.name + "): " + m.content : m.content,
+    content: m.sender
+      ? "(human agent " + m.sender.name + "): " + m.content
+      : m.historyContent !== undefined
+      ? m.historyContent
+      : m.content,
   }));
 }
 
