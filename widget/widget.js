@@ -279,7 +279,23 @@
       "#cw-faq-list{flex:1;overflow-y:auto;padding:14px 16px 18px;display:flex;flex-direction:column;gap:8px;background:#f7f8fa}" +
       "#cw-faq-list::-webkit-scrollbar,#cw-home-list::-webkit-scrollbar,#cw-messages-list::-webkit-scrollbar{width:6px}" +
       "#cw-faq-list::-webkit-scrollbar-thumb,#cw-home-list::-webkit-scrollbar-thumb,#cw-messages-list::-webkit-scrollbar-thumb{background:#d4d6dd;border-radius:3px}" +
-      ".cw-faq-item{background:#fff;border:1px solid #e8e9ee;border-radius:12px;overflow:hidden}" +
+      // flex-shrink:0 is load-bearing here, not decorative: .cw-faq-item is a
+      // flex child of a flex-column list (#cw-faq-list on Help, #cw-home-list
+      // on Home) that's itself height-bounded and overflow-y:auto. Without
+      // it, flexbox's default flex-shrink:1 kicks in the moment an expanded
+      // item's content pushes the list's total height past what's visible --
+      // squeezing every item down to fit INSTEAD OF letting the list scroll,
+      // since overflow-y:auto on the ancestor doesn't stop flex-shrink from
+      // still trying to fit everything in the available space first. Because
+      // this item's own overflow is hidden, that squeeze silently clips the
+      // answer rather than resizing anything visibly broken -- exactly the
+      // reported bug (answer "cut off at one line"). Confirmed via computed
+      // styles: an open item's own scrollHeight (its true content height)
+      // was up to 98px taller than its clientHeight (the shrunk, rendered
+      // height) before this fix, on FAQs with several items and longer
+      // answers -- short lists with short answers happened not to hit the
+      // available-space ceiling, which is why this went unnoticed initially.
+      ".cw-faq-item{background:#fff;border:1px solid #e8e9ee;border-radius:12px;overflow:hidden;flex-shrink:0}" +
       ".cw-faq-q{display:flex;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:none;padding:13px 14px;cursor:pointer;font-family:inherit;font-size:14px;font-weight:550;color:#1a1c22;line-height:1.4}" +
       ".cw-faq-q span{flex:1}" +
       ".cw-faq-caret{color:#b0b3bd;display:flex;flex-shrink:0;transition:transform .2s ease}" +
