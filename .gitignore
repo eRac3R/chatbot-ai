@@ -1,6 +1,7 @@
 node_modules/
 .env
 *.log
+sdk/dist/
 
 # Agent CRM accounts. Only written when running without Redis, but these
 # files contain password hashes -- never commit them.

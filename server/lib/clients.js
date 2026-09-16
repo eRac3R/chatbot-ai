@@ -160,6 +160,22 @@ async function getClient(clientId) {
     client.createdAt = client.updatedAt || new Date().toISOString();
     needsSave = true;
   }
+  // Lets an external system (e.g. a CRM this workspace is embedded in) call
+  // the workspace API server-to-server, without a human logging into this
+  // product at all -- see requireWorkspaceKey in lib/auth.js. Two separate
+  // keys, not one, so the calling system can enforce the same owner-vs-agent
+  // distinction this product already does: an agentApiKey can only ever
+  // reach chat actions (claim/reply/release/close), never business
+  // settings or team management, regardless of what the calling system's
+  // own permission check does or doesn't get right.
+  if (!client.ownerApiKey) {
+    client.ownerApiKey = "owner_" + crypto.randomBytes(24).toString("hex");
+    needsSave = true;
+  }
+  if (!client.agentApiKey) {
+    client.agentApiKey = "agent_" + crypto.randomBytes(24).toString("hex");
+    needsSave = true;
+  }
   if (needsSave) {
     if (hasRedis) {
       await redisUpsertClient(client);
@@ -249,6 +265,17 @@ async function upsertClient(config) {
     // hand over their cross-device chat history. Generated once, never
     // exposed through the public widget config. See lib/identity.js.
     identitySecret: existing.identitySecret || crypto.randomBytes(32).toString("hex"),
+    // config.rotateApiKeys: true forces fresh keys (e.g. after a suspected
+    // leak) -- the immediate effect is that whatever system was using the
+    // old ones starts getting 401s until it's updated with the new pair.
+    ownerApiKey:
+      !config.rotateApiKeys && existing.ownerApiKey
+        ? existing.ownerApiKey
+        : "owner_" + crypto.randomBytes(24).toString("hex"),
+    agentApiKey:
+      !config.rotateApiKeys && existing.agentApiKey
+        ? existing.agentApiKey
+        : "agent_" + crypto.randomBytes(24).toString("hex"),
     createdAt: existing.createdAt || new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };

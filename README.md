@@ -563,6 +563,63 @@ FAQs.
   venue?", grounded in an actual number from the crawled page), not generic
   filler.
 
+### External integrations (API keys + the TypeScript SDK)
+
+For a system outside this product (a CRM, most concretely) to act as a
+workspace's agents/owner without a human logging into `/app.html` at all --
+e.g. so a CRM's own dashboard can natively show/claim/reply to chats.
+
+- **Every workspace gets two API keys** (`ownerApiKey`/`agentApiKey` on the
+  client record, `lib/clients.js`, generated the same backfill-on-read way
+  as `identitySecret`) -- deliberately two, not one, so the calling system
+  can keep enforcing the same owner-vs-agent split this product already
+  does: an `agentApiKey` can reach chat actions only, never settings or
+  team management, regardless of whether the calling system's own
+  permission check has a bug. Neither key is exposed through the workspace
+  API itself (`GET/POST /client` strip both, same as `identitySecret`) --
+  only the platform-admin API returns them, a deliberate separate action
+  rather than something that rides along with an ordinary Settings load.
+- **`requireAuth` (`lib/auth.js`) accepts either the browser cookie login
+  or an API key**, unifying into the exact same `req.user` shape either
+  way -- nothing downstream (`loadOwnSession`, `requireOwner`, the
+  claim/reply collision guard) needs to know or care which one
+  authenticated a given request. Key auth needs `x-workspace-id` +
+  `x-api-key`; write requests (POST/DELETE) additionally need
+  `x-agent-id` + `x-agent-name` (+ optional `x-agent-avatar`) identifying
+  who on the CALLING system's side is acting, since this product has no
+  account of its own for them. `x-agent-id` in particular becomes
+  `session.agentUserId`, which is what makes two different external
+  agents claiming/replying collide correctly instead of every API-key call
+  looking like the same anonymous caller. GET requests don't need
+  identity -- nothing about "who's asking" changes an inbox listing or a
+  config read.
+- **The TypeScript SDK** (`sdk/`) wraps all of this into typed methods --
+  `getInbox()`, `claim()`, `reply()`, `release()`, `close()`,
+  `getConfig()`/`updateConfig()`, `listUsers()`/`addUser()`/`removeUser()`
+  -- handling the header plumbing internally and throwing a typed
+  `ChatbotApiError` (with the real HTTP `status`) on any non-2xx response.
+  See `sdk/README.md` for usage. Verified against a real running instance
+  while building it, not just compiled: read-only calls, owner-vs-agent
+  403 enforcement, and a full claim -> reply -> cross-agent 409 collision
+  -> release lifecycle, all through the compiled SDK, not just direct
+  `curl` calls to the routes it wraps.
+- **One real bug this caught while building it:** the first version of the
+  API-key auth required `x-agent-id`/`x-agent-name` on every request
+  unconditionally, including read-only ones like `getInbox()` -- which
+  has no "acting agent" concept at all. Running the actual compiled SDK
+  against a live server (not just curl-ing individual endpoints by hand)
+  surfaced this immediately as a 401 on the very first call. Fixed by only
+  requiring agent identity on writes (POST/DELETE), where it's either
+  actually used (claim/reply/close) or reasonable to require anyway as a
+  general "every mutating action names an actor" policy.
+- **Provisioning a new workspace** still goes through the existing
+  platform-admin `POST /api/admin/clients` (gated by the single shared
+  `ADMIN_KEY`, see below) -- a one-time, backend-only call when a new
+  workspace is set up, not something the CRM's frontend or a browser ever
+  touches directly. `ADMIN_KEY` can reach every workspace's data, so it
+  needs to be a real random secret before being shared with another
+  system's backend, not the local dev placeholder.
+
 ### The Agent Desk (`/app.html`)
 
 A business's own login, so customers never touch `ADMIN_KEY`. This is the

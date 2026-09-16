@@ -284,10 +284,15 @@ router.post("/users/:userId", requireOwner, async (req, res) => {
 // This is the old standalone admin page, moved inside the login so a
 // business can maintain its own bot without us handing out a shared key.
 
+// identitySecret and the two API keys are all bearer-token-equivalent
+// secrets -- none belong in a response a browser session can read out of
+// devtools. The API keys are handed out through the platform admin API
+// instead (see routes/admin.js), a deliberate separate action rather than
+// something that rides along with an ordinary Settings page load.
 router.get("/client", requireOwner, async (req, res) => {
   const client = await getClient(req.user.clientId);
   if (!client) return res.status(404).json({ error: "Workspace not found" });
-  const { identitySecret, ...safe } = client;
+  const { identitySecret, ownerApiKey, agentApiKey, ...safe } = client;
   res.json(safe);
 });
 
@@ -296,7 +301,7 @@ router.post("/client", requireOwner, async (req, res) => {
     // Force the id: whatever the body says, an owner can only ever write to
     // their own workspace.
     const saved = await upsertClient({ ...(req.body || {}), id: req.user.clientId });
-    const { identitySecret, ...safe } = saved;
+    const { identitySecret, ownerApiKey, agentApiKey, ...safe } = saved;
     res.json(safe);
   } catch (err) {
     res.status(400).json({ error: err.message });

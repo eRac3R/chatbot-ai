@@ -1,5 +1,6 @@
 const crypto = require("crypto");
 const { getUser } = require("./users");
+const { getClient } = require("./clients");
 
 // Login sessions for the agent CRM.
 //
@@ -88,9 +89,87 @@ function clearSessionCookie(res) {
 
 // ---- middleware ----
 
-// Populates req.user from the session cookie. Rejects rather than falling
-// through, so every route mounted behind it can assume req.user exists.
+function timingSafeEqualStrings(a, b) {
+  const bufA = Buffer.from(String(a));
+  const bufB = Buffer.from(String(b));
+  // Buffers of different length would throw in timingSafeEqual rather than
+  // just returning false -- and length itself is safe to leak here (it's
+  // not derived from the secret), so this short-circuit is fine.
+  if (bufA.length !== bufB.length) return false;
+  return crypto.timingSafeEqual(bufA, bufB);
+}
+
+// Server-to-server alternative to the cookie login above -- e.g. a CRM this
+// workspace is embedded in, calling on behalf of whichever of ITS OWN users
+// is currently active, rather than a human logging into this product
+// directly. x-workspace-id + x-api-key select which workspace and which of
+// its two keys (see ownerApiKey/agentApiKey in lib/clients.js) is being
+// used; x-agent-id/x-agent-name/x-agent-avatar identify the acting person,
+// since we have no account of our own for them -- x-agent-id in particular
+// is what session.agentUserId ends up set to, so two different external
+// agents claiming/replying still collide correctly (see loadOwnSession's
+// callers in routes/workspace.js) instead of every API-key call looking
+// like the same anonymous caller.
+async function authenticateWithApiKey(req) {
+  const clientId = req.header("x-workspace-id");
+  const apiKey = req.header("x-api-key");
+  if (!clientId || !apiKey) return null;
+
+  const client = await getClient(clientId);
+  if (!client) return null;
+
+  let role = null;
+  if (client.ownerApiKey && timingSafeEqualStrings(apiKey, client.ownerApiKey)) role = "owner";
+  else if (client.agentApiKey && timingSafeEqualStrings(apiKey, client.agentApiKey)) role = "agent";
+  if (!role) return null;
+
+  const agentId = req.header("x-agent-id");
+  const agentName = req.header("x-agent-name");
+  // Every read (GET) in this API is either workspace-wide (inbox, config,
+  // team list) or already scoped by a session id in the URL -- nothing
+  // about "who's asking" changes the answer, so identity is optional there.
+  // Every write (POST/DELETE) either needs it directly (claim/reply/close
+  // use x-agent-id for the same-agent collision guard against
+  // session.agentUserId, and x-agent-name as what the visitor sees in
+  // place of the bot) or is fine defaulting it (release doesn't check
+  // ownership at all; addUser/removeUser don't use identity downstream
+  // either) -- requiring it uniformly on writes is a deliberate "every
+  // mutating action names an actor" policy, not something each route has
+  // to opt into individually.
+  if (req.method !== "GET" && (!agentId || !agentName)) return null;
+
+  return {
+    // Prefixed so this can never collide with a real users.js id ("usr_...")
+    // if the same string ever got reused as an x-agent-id by mistake.
+    id: agentId ? "ext:" + agentId : null,
+    clientId,
+    role,
+    name: agentName ? agentName.slice(0, 60) : "",
+    avatarUrl: req.header("x-agent-avatar") || "",
+  };
+}
+
+// Populates req.user from either an API key (server-to-server) or the
+// session cookie (browser). Rejects rather than falling through, so every
+// route mounted behind it can assume req.user exists either way -- nothing
+// downstream (loadOwnSession, requireOwner, claim/reply's identity fields)
+// needs to know or care which path authenticated the request.
 async function requireAuth(req, res, next) {
+  // x-api-key present at all means the caller is unambiguously attempting
+  // key auth -- fail with a specific error rather than silently falling
+  // through to the cookie check and returning a generic "Not signed in"
+  // for what's actually a bad key or a missing agent-identity header.
+  if (req.header("x-api-key")) {
+    const apiKeyUser = await authenticateWithApiKey(req);
+    if (!apiKeyUser) {
+      return res.status(401).json({
+        error: "Invalid workspace API key, or missing x-agent-id/x-agent-name headers",
+      });
+    }
+    req.user = apiKeyUser;
+    return next();
+  }
+
   if (!sessionSecret()) {
     return res.status(500).json({
       error: "Server misconfigured: set SESSION_SECRET (or ADMIN_KEY) in .env",
