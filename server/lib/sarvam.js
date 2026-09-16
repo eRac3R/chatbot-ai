@@ -278,6 +278,48 @@ async function getSuggestedReplies({ clientConfig, history, userMessage }) {
   }
 }
 
+const MAX_SUGGESTED_FAQS = 6;
+
+// Turns freshly-crawled page text into a starter set of FAQ question/answer
+// pairs, staged into the Settings/admin-panel FAQ editor for review -- same
+// pattern as navPages from lib/crawler.js: importing a site's content is
+// already part of onboarding, so a first draft of its FAQs comes along for
+// free instead of a business having to write every one by hand from a blank
+// editor. A one-off content-generation call, not a conversation, so it
+// skips toSarvamMessages/history entirely -- just one user-role message.
+async function getSuggestedFaqs({ businessInfo }) {
+  if (!businessInfo || !businessInfo.trim()) return [];
+
+  const prompt = [
+    `You write FAQ question-and-answer pairs for a business's chat widget, based ONLY on the website content below.`,
+    `Write up to ${MAX_SUGGESTED_FAQS} FAQs a real visitor would plausibly ask, each with a short, concrete answer (1-2 sentences) drawn directly from the content. Never invent a fact, price, or policy that isn't stated.`,
+    `If the content doesn't give you enough for a good, specific FAQ, write fewer rather than padding with vague or generic ones -- an empty array is fine if nothing concrete stands out.`,
+    ``,
+    `=== WEBSITE CONTENT ===`,
+    businessInfo.slice(0, 16000),
+    ``,
+    `Respond with ONLY a JSON array of {"question":..., "answer":...} objects, nothing else -- no markdown fences, no commentary.`,
+    `Good example: [{"question":"Do you offer free shipping?","answer":"Yes, on all US orders over $25."}]`,
+  ].join("\n");
+
+  try {
+    const text = await callSarvam([{ role: "user", content: prompt }], {
+      maxTokens: 900,
+      temperature: 0.3,
+    });
+    const trimmed = (text || "").trim();
+    const match = trimmed.match(/\[[\s\S]*\]/);
+    const parsed = JSON.parse(match ? match[0] : trimmed);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((f) => f && typeof f.question === "string" && typeof f.answer === "string" && f.question.trim() && f.answer.trim())
+      .slice(0, MAX_SUGGESTED_FAQS)
+      .map((f) => ({ question: f.question.trim().slice(0, 150), answer: f.answer.trim().slice(0, 400) }));
+  } catch {
+    return []; // a nice-to-have; a crawl that fails to generate FAQs still returns businessInfo/navPages fine
+  }
+}
+
 async function getChatReply({ clientConfig, history, userMessage }) {
   return callSarvam(toSarvamMessages(buildSystemPrompt(clientConfig), history, userMessage), {
     maxTokens: 500,
@@ -288,6 +330,7 @@ async function getChatReply({ clientConfig, history, userMessage }) {
 module.exports = {
   getChatReply,
   getSuggestedReplies,
+  getSuggestedFaqs,
   buildSystemPrompt,
   AGENT_HANDOFF_MARKER,
   extractNavOptions,

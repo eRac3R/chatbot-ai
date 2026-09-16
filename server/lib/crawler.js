@@ -2,17 +2,26 @@ const dns = require("node:dns").promises;
 const net = require("node:net");
 const cheerio = require("cheerio");
 
-const MAX_PAGES = 5;
+const MAX_PAGES = 8;
 const MAX_CHARS_PER_PAGE = 4000;
-const MAX_TOTAL_CHARS = 12000;
+const MAX_TOTAL_CHARS = 20000;
 const FETCH_TIMEOUT_MS = 8000;
 const MAX_RESPONSE_BYTES = 2 * 1024 * 1024; // 2MB per page
 
-// Links whose URL/text hints at useful business content get crawled first.
+// Links whose URL/text hints at useful business content get crawled first,
+// as a fallback for whatever a site's own <nav>/<header> didn't already
+// surface (see extractNavLinks) -- word-boundary matched, not substring,
+// so e.g. "product" doesn't false-positive-match inside "productive" or
+// "return" inside a sentence like "...he left, never to return." (both
+// real cases seen crawling a hotel site: pulled an unrelated offer page and
+// a nearby-attraction history blurb ahead of the site's actual Dining and
+// Safari pages, which scored 0 for not containing any of these words at
+// all). Precompiled once since scoreLink runs per candidate link.
 const PRIORITY_KEYWORDS = [
   "about", "faq", "help", "support", "pricing", "plans", "product",
   "service", "shipping", "return", "refund", "contact",
 ];
+const PRIORITY_KEYWORD_PATTERNS = PRIORITY_KEYWORDS.map((k) => new RegExp(`\\b${k}\\b`, "i"));
 
 function isValidHttpUrl(str) {
   try {
@@ -119,12 +128,16 @@ function labelFromUrl(url) {
   }
 }
 
-function extractSameOriginLinks(html, baseUrl) {
+// `selector` scopes which links get collected -- see the two call sites
+// below: once for just <nav>/<header> (a site's own information
+// architecture, trusted as-is and always fetched first regardless of
+// keyword scoring) and once for everything else (keyword-scored fallback).
+function extractSameOriginLinks(html, baseUrl, selector) {
   const $ = cheerio.load(html);
   const base = new URL(baseUrl);
-  const links = new Map(); // href -> anchor text, for keyword scoring
+  const links = new Map(); // href -> anchor text, for keyword scoring / labels
 
-  $("a[href]").each((_, a) => {
+  $(selector).each((_, a) => {
     const href = $(a).attr("href");
     if (!href) return;
     try {
@@ -145,8 +158,16 @@ function extractSameOriginLinks(html, baseUrl) {
 
 function scoreLink(href, text) {
   const haystack = (href + " " + text).toLowerCase();
-  return PRIORITY_KEYWORDS.some((k) => haystack.includes(k)) ? 1 : 0;
+  return PRIORITY_KEYWORD_PATTERNS.some((re) => re.test(haystack)) ? 1 : 0;
 }
+
+// Some anchors (card-style "offer" links especially) wrap a whole
+// descriptive paragraph as their text, not a short label -- e.g. "Corporate
+// Offsite MeetThis thoughtfully planned itinerary combines productive
+// business sessions...". Truncating that at 60 chars mid-sentence makes a
+// bad button label, so anything implausibly long is treated as "no usable
+// anchor text" and falls through to the page's own <title> instead.
+const MAX_PLAUSIBLE_ANCHOR_LABEL_LENGTH = 60;
 
 async function crawlWebsite(startUrl) {
   if (!isValidHttpUrl(startUrl)) {
@@ -179,9 +200,21 @@ async function crawlWebsite(startUrl) {
     navPages.push({ label: startLabel.slice(0, 60), url: startUrl });
   }
 
-  const candidateLinks = extractSameOriginLinks(startHtml, startUrl)
-    .sort((a, b) => scoreLink(b[0], b[1]) - scoreLink(a[0], a[1]))
-    .slice(0, (MAX_PAGES - 1) * 2); // fetch a few extra in case some fail
+  // The site's own <nav>/<header> links go first, in their own order, no
+  // keyword scoring involved -- whatever a business put in its main nav
+  // *is* the list of pages it considers important, for any industry, which
+  // a fixed keyword list can never fully anticipate (a hotel's most
+  // important pages are Dining/Safari/Rooms, none of which mention
+  // "product" or "service"). Keyword scoring below is then only a fallback
+  // for filling remaining budget from the rest of the page once nav links
+  // are exhausted -- and only from links not already queued.
+  const navLinks = extractSameOriginLinks(startHtml, startUrl, "nav a[href], header a[href]");
+  const navHrefs = new Set(navLinks.map(([href]) => href));
+  const otherLinks = extractSameOriginLinks(startHtml, startUrl, "a[href]")
+    .filter(([href]) => !navHrefs.has(href))
+    .sort((a, b) => scoreLink(b[0], b[1]) - scoreLink(a[0], a[1]));
+
+  const candidateLinks = [...navLinks, ...otherLinks].slice(0, (MAX_PAGES - 1) * 2);
 
   for (const [link, anchorText] of candidateLinks) {
     if (pages.length >= MAX_PAGES || totalChars >= MAX_TOTAL_CHARS) break;
@@ -191,7 +224,11 @@ async function crawlWebsite(startUrl) {
     if (!text) continue;
     pages.push({ url: link, text });
     totalChars += text.length;
-    const label = anchorText.trim() || extractTitle(html) || labelFromUrl(link);
+    const trimmedAnchor = anchorText.trim();
+    const label =
+      (trimmedAnchor.length && trimmedAnchor.length <= MAX_PLAUSIBLE_ANCHOR_LABEL_LENGTH ? trimmedAnchor : "") ||
+      extractTitle(html) ||
+      labelFromUrl(link);
     navPages.push({ label: label.slice(0, 60), url: link });
   }
 

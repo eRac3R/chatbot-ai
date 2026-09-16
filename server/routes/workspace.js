@@ -2,6 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const { getClient, upsertClient } = require("../lib/clients");
 const { crawlWebsite } = require("../lib/crawler");
+const { getSuggestedFaqs } = require("../lib/sarvam");
 const { extractPdfText } = require("../lib/pdfExtractor");
 const {
   listUsers,
@@ -315,7 +316,8 @@ router.post("/client/crawl", requireOwner, async (req, res) => {
   }
   try {
     const result = await crawlWebsite(url.trim());
-    res.json(result);
+    const suggestedFaqs = await getSuggestedFaqs({ businessInfo: result.businessInfo });
+    res.json({ ...result, suggestedFaqs });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

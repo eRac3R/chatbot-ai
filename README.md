@@ -100,13 +100,38 @@ rather than `ADMIN_KEY`) that call the exact same `lib/crawler.js` and
 without asking us to do it:
 - **Manual** — paste product info and add FAQs directly.
 - **Import from website** — enter the business's URL and click "Fetch
-  content"; `server/lib/crawler.js` fetches the page plus a few same-domain
-  links that look like About/FAQ/Pricing/Support pages, strips it to clean
-  text. Capped (5 pages, ~12k characters total, 8s timeout per page, 2MB per
-  page) and refuses to fetch private/internal IP addresses. Doesn't render
-  JS-heavy sites (no headless browser) — for those, use manual entry instead.
-  Merges straight into the businessInfo box on fetch, no separate save step
-  before it's visible there.
+  content"; `server/lib/crawler.js` fetches the start page plus up to 7 more
+  same-domain pages, strips each to clean text. Capped (8 pages, ~20k
+  characters total, 8s timeout per page, 2MB per page) and refuses to fetch
+  private/internal IP addresses. Doesn't render JS-heavy sites (no headless
+  browser) — for those, use manual entry instead. Merges straight into the
+  businessInfo box on fetch, no separate save step before it's visible
+  there. Also auto-populates page-link buttons and suggests FAQs — see
+  below.
+  - **Which extra pages it follows matters a lot**, and used to be a weak
+    point: links inside the site's own `<nav>`/`<header>` are now always
+    fetched first, in the order the site itself put them, before anything
+    else — a business's own main navigation *is* the list of pages it
+    considers important, for any industry, and that's a far more reliable
+    signal than a fixed keyword list could ever be. Keyword matching (a
+    fallback list -- about/faq/help/support/pricing/etc., word-boundary
+    matched) only fills in remaining budget from the rest of the page once
+    nav links are exhausted. Concretely found and fixed crawling a hotel
+    site: naive substring matching had "product" false-positive inside
+    "productive" and "return" inside "...he left, never to return" (travel
+    narrative text, not a policy), pulling two irrelevant pages ahead of the
+    site's actual Dining and Safari pages, which scored 0 for containing
+    none of the keywords at all — those didn't get crawled, so the bot had
+    nothing to say about them and no button to offer for them either. Fixed
+    by word-boundary regex matching and, more fundamentally, by trusting
+    nav links first regardless of keyword score.
+  - **A page's label** (used for its nav button, see below) prefers the
+    anchor text that linked to it — but only if it's short and plausible; a
+    card-style link wrapping a whole descriptive paragraph as its "text"
+    (seen on the same hotel site: "Corporate Offsite MeetThis thoughtfully
+    planned itinerary combines productive business sessions...") falls
+    through to that page's own `<title>` instead of truncating the
+    paragraph mid-sentence into a nonsense button label.
 - **Import from PDF** — choosing a file (no separate "Extract" button)
   immediately calls `server/lib/pdfExtractor.js` (15MB max, ~12k characters
   kept; scanned/image-only PDFs with no real text layer won't extract
@@ -505,6 +530,38 @@ stays open either way.
     (`readOpenState`) *before* `buildUI()` runs and passing that captured
     value into `restoreOpenState` explicitly, rather than having it
     re-read a key `buildUI`'s own side effects had already wiped.
+
+### FAQ auto-suggestion
+
+The crawl only ever produced `businessInfo` (raw page text) and, once nav
+buttons existed, `navPages` (page links) — never FAQs. Those stayed a fully
+manual field, "+Add FAQ" in Settings, however much content got imported.
+That gap went unnoticed until page links started auto-populating right next
+to a still-empty FAQ list and "Top Questions" tab — a real business hit this
+crawling a hotel site: 20k characters of businessInfo and 9 page links, zero
+FAQs.
+
+- `getSuggestedFaqs` (`lib/sarvam.js`) is a one-off content-generation call
+  (not a conversation — skips `toSarvamMessages`/history, just one
+  user-role message) that reads the freshly-crawled `businessInfo` and
+  writes up to `MAX_SUGGESTED_FAQS` (6) `{question, answer}` pairs, grounded
+  only in what's actually there — told to write fewer rather than pad with
+  generic ones if the content doesn't support a specific answer. Both crawl
+  routes (`routes/admin.js`, `routes/workspace.js`) call it right after
+  `crawlWebsite` and return `suggestedFaqs` alongside `businessInfo`/
+  `navPages` in the same response — same request, no separate button.
+- The Settings tab and admin panel merge these into the FAQ editor
+  (`mergeFaqs`/`mergeAdminFaqs`, `app.html`) the moment a crawl completes —
+  staged for review/edit, same as everything else a crawl produces, nothing
+  saved until the business clicks Save. Deduped against FAQs already in the
+  editor by normalized question text (lowercased, punctuation stripped) so
+  re-crawling the same site doesn't pile up repeats, and a business's own
+  hand-written FAQ never gets shadowed by a reworded AI version of the same
+  question.
+- Verified against a real hotel site's content: 5-6 specific, accurate FAQs
+  per run ("What is the maximum capacity of the Maharani Lawn wedding
+  venue?", grounded in an actual number from the crawled page), not generic
+  filler.
 
 ### The Agent Desk (`/app.html`)
 

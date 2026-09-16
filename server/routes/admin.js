@@ -8,6 +8,7 @@ const {
   deleteClient,
 } = require("../lib/clients");
 const { crawlWebsite } = require("../lib/crawler");
+const { getSuggestedFaqs } = require("../lib/sarvam");
 const { extractPdfText } = require("../lib/pdfExtractor");
 const {
   getSession,
@@ -97,7 +98,11 @@ router.post("/crawl", async (req, res) => {
   }
   try {
     const result = await crawlWebsite(url.trim());
-    res.json(result);
+    // Best-effort: a crawl that succeeds but fails to produce FAQs (e.g. the
+    // Sarvam call errors) still returns businessInfo/navPages fine --
+    // getSuggestedFaqs never throws, just returns [].
+    const suggestedFaqs = await getSuggestedFaqs({ businessInfo: result.businessInfo });
+    res.json({ ...result, suggestedFaqs });
   } catch (err) {
     res.status(400).json({ error: err.message });
   }

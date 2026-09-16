@@ -437,7 +437,7 @@
         </div>
         <div class="card">
           <h3>FAQs</h3>
-          <p class="hint">Shown as tappable questions in the widget, and used as answers by the bot.</p>
+          <p class="hint">Shown as tappable questions in the widget, and used as answers by the bot. A first draft gets suggested automatically from "Import from website" above — review and edit before saving.</p>
           <div id="faqList"></div>
           <button class="btn btn-ghost btn-sm" id="addFaqBtn">+ Add FAQ</button>
         </div>
@@ -1069,6 +1069,26 @@
     return added;
   }
 
+  // Mirrors mergeFaqs in the Settings tab (normalizeQuestion is defined
+  // there, shared across this whole script).
+  function mergeAdminFaqs(suggestedFaqs) {
+    if (!suggestedFaqs || !suggestedFaqs.length) return 0;
+    var existing = {};
+    var qInputs = $("adminFaqList").querySelectorAll(".faq-q");
+    for (var i = 0; i < qInputs.length; i++) {
+      existing[normalizeQuestion(qInputs[i].value)] = true;
+    }
+    var added = 0;
+    suggestedFaqs.forEach(function (f) {
+      var key = normalizeQuestion(f.question);
+      if (!key || existing[key]) return;
+      existing[key] = true;
+      addAdminFaqRow(f.question, f.answer);
+      added++;
+    });
+    return added;
+  }
+
   $("adminCrawlBtn").addEventListener("click", function () {
     var statusEl = $("adminCrawlStatus");
     var url = $("adminCrawlUrl").value.trim();
@@ -1079,10 +1099,13 @@
         var box = $("adminBusinessInfo");
         box.value = box.value ? box.value + "\n\n" + data.businessInfo : data.businessInfo;
         var addedLinks = mergeAdminNavPages(data.navPages);
+        var addedFaqs = mergeAdminFaqs(data.suggestedFaqs);
+        var extras = [];
+        if (addedLinks) extras.push(addedLinks + " page link" + (addedLinks === 1 ? "" : "s") + " for the bot to offer as buttons");
+        if (addedFaqs) extras.push(addedFaqs + " suggested FAQ" + (addedFaqs === 1 ? "" : "s") + " (below — review before saving)");
         statusEl.innerHTML = '<div class="ok">Imported ' + data.pages.length + ' page(s): ' +
           esc(data.pages.join(", ")) + '. Review/edit the text below before saving.' +
-          (addedLinks ? " Also added " + addedLinks + " page link" + (addedLinks === 1 ? "" : "s") +
-            " below for the bot to offer as buttons." : "") + '</div>';
+          (extras.length ? " Also added " + extras.join(" and ") + "." : "") + '</div>';
       })
       .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
   });
@@ -1597,15 +1620,8 @@
   }
 
   function renderFaqs(faqs) {
-    $("faqList").innerHTML = faqs.map(function (f) {
-      return '<div class="faq-item">' +
-        '<div class="row"><div class="field" style="margin:0"><label>Question</label>' +
-        '<input type="text" class="faq-q" value="' + esc(f.question) + '" /></div></div>' +
-        '<div class="field" style="margin:0"><label>Answer</label>' +
-        '<textarea class="faq-a" style="min-height:64px">' + esc(f.answer) + "</textarea></div>" +
-        '<button class="btn btn-danger btn-sm faq-del" style="margin-top:9px">Remove</button></div>';
-    }).join("");
-    bindFaqDeletes();
+    $("faqList").innerHTML = "";
+    faqs.forEach(function (f) { addFaqRow(f.question, f.answer); });
   }
 
   $("copySnippetBtn").addEventListener("click", function () {
@@ -1639,18 +1655,49 @@
     }
   }
 
-  $("addFaqBtn").addEventListener("click", function () {
+  function addFaqRow(question, answer) {
     var div = document.createElement("div");
     div.className = "faq-item";
     div.innerHTML =
       '<div class="row"><div class="field" style="margin:0"><label>Question</label>' +
-      '<input type="text" class="faq-q" /></div></div>' +
+      '<input type="text" class="faq-q" value="' + esc(question || "") + '" /></div></div>' +
       '<div class="field" style="margin:0"><label>Answer</label>' +
-      '<textarea class="faq-a" style="min-height:64px"></textarea></div>' +
+      '<textarea class="faq-a" style="min-height:64px">' + esc(answer || "") + "</textarea></div>" +
       '<button class="btn btn-danger btn-sm faq-del" style="margin-top:9px">Remove</button>';
     $("faqList").appendChild(div);
     bindFaqDeletes();
-  });
+  }
+
+  // Merges freshly AI-suggested FAQs (from a crawl -- see mergeNavPages
+  // just below for the identical pattern with page links) into the editor
+  // without disturbing rows already there -- skipped by near-duplicate
+  // question text (normalized: lowercased, trimmed, punctuation stripped)
+  // so re-crawling the same site doesn't pile up the same suggestion twice,
+  // and a business's own hand-written FAQ isn't shadowed by a reworded
+  // AI version of the same question.
+  function normalizeQuestion(q) {
+    return (q || "").toLowerCase().trim().replace(/[^\w\s]/g, "").replace(/\s+/g, " ");
+  }
+
+  function mergeFaqs(suggestedFaqs) {
+    if (!suggestedFaqs || !suggestedFaqs.length) return 0;
+    var existing = {};
+    var qInputs = $("faqList").querySelectorAll(".faq-q");
+    for (var i = 0; i < qInputs.length; i++) {
+      existing[normalizeQuestion(qInputs[i].value)] = true;
+    }
+    var added = 0;
+    suggestedFaqs.forEach(function (f) {
+      var key = normalizeQuestion(f.question);
+      if (!key || existing[key]) return;
+      existing[key] = true;
+      addFaqRow(f.question, f.answer);
+      added++;
+    });
+    return added;
+  }
+
+  $("addFaqBtn").addEventListener("click", function () { addFaqRow(); });
 
   function renderPages(pages) {
     $("pagesList").innerHTML = "";
@@ -1740,10 +1787,13 @@
         // same crawl -- no separate manual step needed for a business that
         // already imports its site content this way.
         var addedLinks = mergeNavPages(data.navPages);
+        var addedFaqs = mergeFaqs(data.suggestedFaqs);
+        var extras = [];
+        if (addedLinks) extras.push(addedLinks + " page link" + (addedLinks === 1 ? "" : "s") + " for the bot to offer as buttons");
+        if (addedFaqs) extras.push(addedFaqs + " suggested FAQ" + (addedFaqs === 1 ? "" : "s") + " (below — review before saving)");
         statusEl.innerHTML = '<div class="ok">Imported ' + data.pages.length + ' page(s): ' +
           esc(data.pages.join(", ")) + '. Review/edit the text below before saving.' +
-          (addedLinks ? " Also added " + addedLinks + " page link" + (addedLinks === 1 ? "" : "s") +
-            " below for the bot to offer as buttons." : "") + '</div>';
+          (extras.length ? " Also added " + extras.join(" and ") + "." : "") + '</div>';
       })
       .catch(function (err) { statusEl.innerHTML = '<div class="err">' + esc(err.message) + "</div>"; });
   });
