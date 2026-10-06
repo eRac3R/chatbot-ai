@@ -24,7 +24,7 @@ const {
   getUser,
   publicUser,
 } = require("../lib/users");
-const { requirePlatformAdmin } = require("../lib/auth");
+const { requirePlatformAdmin, createToken, setSessionCookie } = require("../lib/auth");
 
 const router = express.Router();
 
@@ -76,6 +76,31 @@ router.get("/clients/:id", async (req, res) => {
   const client = await getClient(req.params.id);
   if (!client) return res.status(404).json({ error: "Unknown client id" });
   res.json(client);
+});
+
+// Support access: signs this browser in as the workspace's owner, without
+// their password. Sets the same session cookie their own login would, so
+// the normal workspace app loads as them. Every use is logged on the
+// server, and only the platform admin key can reach this route.
+router.post("/clients/:id/impersonate", async (req, res) => {
+  const client = await getClient(req.params.id);
+  if (!client) return res.status(404).json({ error: "Unknown client id" });
+  const owner = (await listUsers(client.id)).find((u) => u.role === "owner");
+  if (!owner) {
+    return res.status(404).json({ error: "This workspace has no owner account to sign in as" });
+  }
+  setSessionCookie(res, createToken(owner.id));
+  // A plain, readable cookie so the dashboard can show the "Support view"
+  // banner. It grants nothing by itself -- access is the session cookie above.
+  res.append(
+    "Set-Cookie",
+    `support_view=${encodeURIComponent(client.id)}; Path=/; SameSite=Lax; Max-Age=${7 * 24 * 60 * 60}` +
+      (process.env.NODE_ENV === "production" ? "; Secure" : "")
+  );
+  console.log(
+    `[impersonate] ${new Date().toISOString()} platform admin signed in as owner ${owner.email} of workspace "${client.id}"`
+  );
+  res.json({ ok: true, workspace: client.id, owner: owner.email });
 });
 
 router.post("/clients", async (req, res) => {

@@ -338,6 +338,12 @@
   </aside>
 
   <main>
+    <!-- Shown only while a platform admin is viewing this workspace as its
+         owner (see the impersonate route). Hidden by default. -->
+    <div id="supportBanner" style="display:none;align-items:center;gap:12px;padding:9px 20px;background:#7c2d12;color:#fed7aa;font-size:13px;font-weight:600;flex-shrink:0">
+      <span style="flex:1">Support view: signed in as the owner of <span id="supportWorkspace"></span></span>
+      <button type="button" class="btn btn-ghost btn-sm" id="exitSupportBtn" style="color:#fff;border-color:rgba(255,255,255,.4)">Exit support view</button>
+    </div>
     <!-- INBOX -->
     <section id="tab-inbox" style="display:flex;flex-direction:column;flex:1;min-height:0">
       <div class="topbar">
@@ -660,12 +666,38 @@
     $("login").classList.remove("hidden");
   }
 
+  // Support view: the impersonate route sets a readable "support_view" cookie
+  // holding the workspace id, purely so this banner knows to appear. Access
+  // itself is the session cookie, so this flag grants nothing on its own.
+  function readSupportView() {
+    var m = document.cookie.match(/(?:^|; )support_view=([^;]*)/);
+    return m ? decodeURIComponent(m[1]) : null;
+  }
+
+  function updateSupportBanner() {
+    var ws = readSupportView();
+    $("supportBanner").style.display = ws ? "flex" : "none";
+    if (ws) $("supportWorkspace").textContent = ws;
+  }
+
+  // Ends the support session and returns to the platform admin login, so the
+  // admin panel is one click away again without leaving the admin key anywhere.
+  function exitSupportView() {
+    api("/auth/logout", { method: "POST" }).catch(function () {}).then(function () {
+      document.cookie = "support_view=; Path=/; Max-Age=0; SameSite=Lax";
+      try { sessionStorage.setItem("openAdminLogin", "1"); } catch (e) {}
+      window.location.reload();
+    });
+  }
+  $("exitSupportBtn").addEventListener("click", exitSupportView);
+
   function showApp(payload) {
     state.me = payload.user;
     state.workspace = payload.workspace;
     $("login").classList.add("hidden");
     $("adminPanel").classList.add("hidden");
     $("app").classList.remove("hidden");
+    updateSupportBanner();
 
     $("wsName").textContent = payload.workspace.botName || payload.workspace.id;
     $("meName").textContent = state.me.name;
@@ -857,6 +889,7 @@
       '</div>' +
       '<div class="ws-row-actions">' +
         '<button type="button" class="btn btn-ghost btn-sm ws-edit">Edit workspace</button>' +
+        '<button type="button" class="btn btn-ghost btn-sm ws-signin-as">Sign in as owner</button>' +
         '<button type="button" class="btn btn-danger btn-sm ws-delete">Delete workspace</button>' +
       '</div>';
 
@@ -881,6 +914,15 @@
     detail.querySelector(".ws-edit").addEventListener("click", function (e) {
       e.stopPropagation();
       editAdminWorkspace(w.id);
+    });
+
+    // Opens the workspace app as its owner, with no password. The server
+    // logs each use. Log out of the workspace app to come back to this panel.
+    detail.querySelector(".ws-signin-as").addEventListener("click", function (e) {
+      e.stopPropagation();
+      adminApi("/clients/" + encodeURIComponent(w.id) + "/impersonate", { method: "POST" })
+        .then(function () { window.location.href = "/app.html"; })
+        .catch(function (err) { toast(err.message); });
     });
 
     detail.querySelector(".ws-delete").addEventListener("click", function (e) {
@@ -1916,7 +1958,16 @@
 
   // ---------- boot ----------
 
-  api("/auth/me").then(showApp).catch(showLogin);
+  api("/auth/me").then(showApp).catch(function () {
+    showLogin();
+    // Coming back from support view: open the platform admin login directly.
+    var goAdmin = false;
+    try {
+      goAdmin = sessionStorage.getItem("openAdminLogin") === "1";
+      sessionStorage.removeItem("openAdminLogin");
+    } catch (e) {}
+    if (goAdmin) $("adminCornerBtn").click();
+  });
 })();
 </script>
 </body>

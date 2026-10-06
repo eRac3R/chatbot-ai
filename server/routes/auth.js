@@ -60,6 +60,9 @@ router.post("/login", async (req, res) => {
 
 router.post("/logout", (req, res) => {
   clearSessionCookie(res);
+  // Also drop the support-view flag, so a normal logout never leaves the
+  // "Support view" banner behind for the next login.
+  res.append("Set-Cookie", "support_view=; Path=/; SameSite=Lax; Max-Age=0");
   res.json({ ok: true });
 });
 
