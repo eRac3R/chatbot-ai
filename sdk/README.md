@@ -1,4 +1,4 @@
-# @branofy/chatbot-sdk
+# @yourname/chatbot-sdk
 
 TypeScript client for the chatbot-ai workspace API. Lets an external
 system (e.g. a CRM) act as a workspace's agents/owner directly from its own
@@ -27,7 +27,7 @@ npm run build   # compiles src/ -> dist/
 ## Usage
 
 ```ts
-import { ChatbotClient } from "@branofy/chatbot-sdk";
+import { ChatbotClient } from "@yourname/chatbot-sdk";
 
 const agents = new ChatbotClient({
   baseUrl: "https://chatbot-ai-pi-pearl.vercel.app",
@@ -68,7 +68,7 @@ Every non-2xx response throws `ChatbotApiError` (`status`, `body`, and a
 `message` pulled from the server's own error text):
 
 ```ts
-import { ChatbotApiError } from "@branofy/chatbot-sdk";
+import { ChatbotApiError } from "@yourname/chatbot-sdk";
 
 try {
   await agents.reply(sessionId, me, "hello");

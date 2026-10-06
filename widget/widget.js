@@ -420,7 +420,7 @@
   // (conversationTempLocked). Called whenever any of those change while the
   // chat view is showing. There's no button here to drive anymore -- a
   // human handoff is now something the bot itself offers/detects in
-  // conversation (see AGENT_HANDOFF_MARKER in server/lib/sarvam.js), not
+  // conversation (see AGENT_HANDOFF_MARKER in server/lib/llm.js), not
   // something the visitor triggers by tapping something.
   //
   // Only conversationLocked disables the composer -- a paused conversation
@@ -473,7 +473,7 @@
     // Sits to the left of the launcher bubble. A sibling of the bubble
     // rather than a child of the window, but CSS only reveals it while
     // #cw-root carries .cw-is-open, so it shows up only once chat is open.
-    var poweredBadge = el("div", { id: "cw-powered-badge", text: "⚡ Powered by Branofy" });
+    var poweredBadge = el("div", { id: "cw-powered-badge", text: "⚡ Powered by AI" });
 
     var win = el("div", { id: "cw-window", role: "dialog", "aria-label": "Chat" });
 
@@ -932,7 +932,7 @@
   }
 
   // Page/section links the bot offers under its reply (see NAV_OPTIONS_MARKER
-  // in server/lib/sarvam.js). Unlike reply chips these are never cleared --
+  // in server/lib/llm.js). Unlike reply chips these are never cleared --
   // they're tied to the specific message they appeared under and stay part
   // of the transcript, since a visitor might want to click one after reading
   // on rather than immediately.

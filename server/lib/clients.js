@@ -58,7 +58,7 @@ function sanitizeQuickReplies(replies) {
 // Named links to specific pages/sections of the business's own site (e.g.
 // "Pricing" -> https://acme.com/pricing#plans), fed to the model so it can
 // offer clickable navigation buttons instead of just describing where
-// something is (see NAV_OPTIONS_MARKER in lib/sarvam.js). Same http(s)-only
+// something is (see NAV_OPTIONS_MARKER in lib/llm.js). Same http(s)-only
 // rule as avatarUrl/website -- these end up both in the model's prompt and,
 // verbatim, in an <a>-like click target in the widget.
 function sanitizePages(pages) {
@@ -253,7 +253,7 @@ async function upsertClient(config) {
       config.website !== undefined ? sanitizeUrl(config.website) : existing.website ?? "",
     // Named page/section links the bot can offer as clickable navigation
     // buttons -- see sanitizePages above and NAV_OPTIONS_MARKER in
-    // lib/sarvam.js. Never rendered directly; only ever surfaced through the
+    // lib/llm.js. Never rendered directly; only ever surfaced through the
     // model choosing one of these verbatim.
     pages: config.pages !== undefined ? sanitizePages(config.pages) : existing.pages ?? [],
     quickReplies:

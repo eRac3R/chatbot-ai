@@ -13,7 +13,7 @@ const { getClient } = require("./clients");
 // sessions. Acceptable at this size, but it's the thing to revisit first if
 // this ever needs "sign out everywhere".
 
-const COOKIE_NAME = "branofy_session";
+const COOKIE_NAME = "agent_session";
 const SESSION_DAYS = 7;
 const SESSION_MS = SESSION_DAYS * 24 * 60 * 60 * 1000;
 
@@ -24,7 +24,7 @@ function sessionSecret() {
   if (process.env.SESSION_SECRET) return process.env.SESSION_SECRET;
   const adminKey = process.env.ADMIN_KEY;
   if (!adminKey) return null;
-  return crypto.createHmac("sha256", adminKey).update("branofy-session-v1").digest("hex");
+  return crypto.createHmac("sha256", adminKey).update("agent-session-v1").digest("hex");
 }
 
 function sign(value) {

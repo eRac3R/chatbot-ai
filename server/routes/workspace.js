@@ -2,7 +2,7 @@ const express = require("express");
 const multer = require("multer");
 const { getClient, upsertClient } = require("../lib/clients");
 const { crawlWebsite } = require("../lib/crawler");
-const { getSuggestedFaqs } = require("../lib/sarvam");
+const { getSuggestedFaqs } = require("../lib/llm");
 const { extractPdfText } = require("../lib/pdfExtractor");
 const {
   listUsers,

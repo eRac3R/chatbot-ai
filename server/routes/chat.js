@@ -1,7 +1,7 @@
 const express = require("express");
 const crypto = require("crypto");
 const { getClient, getPublicClient } = require("../lib/clients");
-const { getChatReply, getSuggestedReplies, AGENT_HANDOFF_MARKER, extractNavOptions } = require("../lib/sarvam");
+const { getChatReply, getSuggestedReplies, AGENT_HANDOFF_MARKER, extractNavOptions } = require("../lib/llm");
 const {
   isValidSessionId,
   isValidVisitorId,
@@ -26,7 +26,7 @@ const MAX_SUGGESTION_TURNS = 3;
 
 // There's no "talk to a live agent" button anymore, and no proactive nudge
 // on a timer either -- the model decides entirely on its own, from the
-// system prompt's rules (see buildSystemPrompt in lib/sarvam.js), when to
+// system prompt's rules (see buildSystemPrompt in lib/llm.js), when to
 // offer a live agent: only when it genuinely doesn't know an answer, or when
 // the visitor is clearly asking the same thing again because a prior answer
 // didn't help. It appends AGENT_HANDOFF_MARKER to its own reply once the

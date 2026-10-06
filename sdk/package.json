@@ -1,7 +1,7 @@
 {
-  "name": "@branofy/chatbot-sdk",
+  "name": "@yourname/chatbot-sdk",
   "version": "0.1.0",
-  "description": "TypeScript client for the Branofy chatbot workspace API -- lets an external system (e.g. a CRM) act as a workspace's agents/owner via API key, no login required.",
+  "description": "TypeScript client for the chatbot workspace API -- lets an external system (e.g. a CRM) act as a workspace's agents/owner via API key, no login required.",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "files": [

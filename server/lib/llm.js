@@ -1,8 +1,8 @@
-// Sarvam AI's chat completions endpoint is OpenAI-compatible, so this is a
-// plain fetch() call rather than a vendor SDK -- one dependency less than
-// the Gemini integration this replaced, and easy to swap again later if
-// needed (everything provider-specific lives in this one file).
-const SARVAM_API_URL = "https://api.sarvam.ai/v1/chat/completions";
+// Gemini's OpenAI-compatible chat completions endpoint, so this is a plain
+// fetch() call rather than a vendor SDK -- no extra npm dependency, and easy
+// to swap again later if needed (everything provider-specific lives in this
+// one file).
+const LLM_API_URL = "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions";
 
 // The model itself appends this exact token to its own reply when it
 // decides the visitor should be handed to a human (see the RULES entry
@@ -110,12 +110,12 @@ function extractNavOptions(rawText) {
 }
 
 function apiKey() {
-  if (!process.env.SARVAM_API_KEY) {
+  if (!process.env.GEMINI_API_KEY) {
     throw new Error(
-      "SARVAM_API_KEY is not set. Add it to your .env file (see .env.example)."
+      "GEMINI_API_KEY is not set. Add it to your .env file (see .env.example)."
     );
   }
-  return process.env.SARVAM_API_KEY;
+  return process.env.GEMINI_API_KEY;
 }
 
 const RETRYABLE_STATUS = new Set([408, 409, 425, 429, 500, 502, 503, 504]);
@@ -126,13 +126,13 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function callSarvamOnce(messages, { maxTokens, temperature }) {
-  const model = process.env.SARVAM_MODEL || "sarvam-105b-conversations";
-  const response = await fetch(SARVAM_API_URL, {
+async function callLLMOnce(messages, { maxTokens, temperature }) {
+  const model = process.env.GEMINI_MODEL || "gemini-flash-lite-latest";
+  const response = await fetch(LLM_API_URL, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "api-subscription-key": apiKey(),
+      Authorization: `Bearer ${apiKey()}`,
     },
     body: JSON.stringify({
       model,
@@ -144,7 +144,7 @@ async function callSarvamOnce(messages, { maxTokens, temperature }) {
 
   if (!response.ok) {
     const body = await response.text().catch(() => "");
-    const err = new Error(`Sarvam API error ${response.status}: ${body.slice(0, 300)}`);
+    const err = new Error(`Gemini API error ${response.status}: ${body.slice(0, 300)}`);
     err.status = response.status;
     throw err;
   }
@@ -162,16 +162,16 @@ async function callSarvamOnce(messages, { maxTokens, temperature }) {
 // otherwise-healthy conversation occasionally has one message fail outright
 // while every message around it works fine -- consistent with a passing
 // hiccup rather than anything actually wrong with the config.
-async function callSarvam(messages, options) {
+async function callLLM(messages, options) {
   let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
     try {
-      return await callSarvamOnce(messages, options);
+      return await callLLMOnce(messages, options);
     } catch (err) {
       lastErr = err;
       const retryable = err.status === undefined || RETRYABLE_STATUS.has(err.status);
       if (!retryable || attempt === MAX_ATTEMPTS) throw err;
-      console.error(`Sarvam call failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying:`, err.message);
+      console.error(`LLM call failed (attempt ${attempt}/${MAX_ATTEMPTS}), retrying:`, err.message);
       await sleep(RETRY_DELAY_MS);
     }
   }
@@ -226,12 +226,12 @@ function buildSystemPrompt(clientConfig) {
   ].join("\n");
 }
 
-// history entries use {role: "user"|"assistant", content}; Sarvam's chat
+// history entries use {role: "user"|"assistant", content}; Gemini's chat
 // completions API is OpenAI-shaped, so those roles carry straight over --
 // unlike Gemini, no "assistant" -> "model" rename needed. The system prompt
 // is just another message in the array (role "system"), not a separate
 // config field.
-function toSarvamMessages(systemPrompt, history, userMessage) {
+function toChatMessages(systemPrompt, history, userMessage) {
   const messages = [{ role: "system", content: systemPrompt }];
   history.forEach((m) => {
     messages.push({ role: m.role === "assistant" ? "assistant" : "user", content: m.content });
@@ -261,7 +261,7 @@ async function getSuggestedReplies({ clientConfig, history, userMessage }) {
   ].join("\n");
 
   try {
-    const text = await callSarvam(toSarvamMessages(prompt, history, userMessage), {
+    const text = await callLLM(toChatMessages(prompt, history, userMessage), {
       maxTokens: 100,
       temperature: 0.2,
     });
@@ -286,7 +286,7 @@ const MAX_SUGGESTED_FAQS = 6;
 // already part of onboarding, so a first draft of its FAQs comes along for
 // free instead of a business having to write every one by hand from a blank
 // editor. A one-off content-generation call, not a conversation, so it
-// skips toSarvamMessages/history entirely -- just one user-role message.
+// skips toChatMessages/history entirely -- just one user-role message.
 async function getSuggestedFaqs({ businessInfo }) {
   if (!businessInfo || !businessInfo.trim()) return [];
 
@@ -303,7 +303,7 @@ async function getSuggestedFaqs({ businessInfo }) {
   ].join("\n");
 
   try {
-    const text = await callSarvam([{ role: "user", content: prompt }], {
+    const text = await callLLM([{ role: "user", content: prompt }], {
       maxTokens: 900,
       temperature: 0.3,
     });
@@ -321,7 +321,7 @@ async function getSuggestedFaqs({ businessInfo }) {
 }
 
 async function getChatReply({ clientConfig, history, userMessage }) {
-  return callSarvam(toSarvamMessages(buildSystemPrompt(clientConfig), history, userMessage), {
+  return callLLM(toChatMessages(buildSystemPrompt(clientConfig), history, userMessage), {
     maxTokens: 500,
     temperature: 0.2,
   });

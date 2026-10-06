@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Branofy — Agent Desk</title>
+<title>Agent Desk</title>
 <style>
   :root{
     --bg:#0f1117; --surface:#171a23; --surface-2:#1e2230; --line:#282d3d;
@@ -271,7 +271,7 @@
     <div class="brand">
       <div class="brand-mark">⚡</div>
       <div>
-        <div class="brand-name" id="loginBrandName">Branofy</div>
+        <div class="brand-name" id="loginBrandName">Agent Desk</div>
         <div class="brand-sub" id="loginBrandSub">Agent Desk</div>
       </div>
     </div>
@@ -1260,11 +1260,11 @@
     if ("Notification" in window && Notification.permission === "granted") {
       var n = new Notification(count > 1 ? count + " visitors want to chat" : "A visitor wants to chat", {
         body: "Open the Agent Desk to pick it up.",
-        tag: "branofy-request",
+        tag: "agent-request",
       });
       n.onclick = function () { window.focus(); n.close(); };
     }
-    document.title = "(" + count + ") Branofy — Agent Desk";
+    document.title = "(" + count + ") Agent Desk";
   }
 
   // ---------- inbox ----------
@@ -1303,7 +1303,7 @@
       var badge = $("navBadge");
       badge.textContent = data.counts.waiting;
       badge.classList.toggle("show", data.counts.waiting > 0);
-      if (!data.counts.waiting) document.title = "Branofy — Agent Desk";
+      if (!data.counts.waiting) document.title = "Agent Desk";
 
       renderConvList(brandNew);
       if (state.openId) refreshOpenSession();
