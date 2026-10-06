@@ -1102,6 +1102,7 @@
           if (!r.ok) {
             var err = new Error(data.error || "Request failed");
             err.locked = !!data.locked;
+            err.seq = data.seq;
             throw err;
           }
           return data;
@@ -1127,6 +1128,10 @@
       })
       .catch(function (err) {
         hideTyping();
+        // A failed AI call still saved the visitor's message server-side, and
+        // the server reports its seq with the error -- move past it, or the
+        // next poll fetches that same message back and shows it twice.
+        if (typeof err.seq === "number") lastSeq = Math.max(lastSeq, err.seq);
         if (err.locked) {
           // The conversation ended (idle timeout) in the moment between our
           // last poll and this send. Pull down the "conversation has ended"
@@ -1134,7 +1139,10 @@
           applyConversationState({ locked: true });
           fetchOpenConversationMessages(false);
         } else {
-          addMessage("bot", "Sorry, I ran into a problem: " + err.message);
+          // Deliberately no on-screen message: a failed AI call stays silent
+          // from the visitor's side. The reason is still logged for the site
+          // owner's browser console.
+          console.warn("[chat-widget] reply failed:", err.message);
         }
       })
       .finally(function () {

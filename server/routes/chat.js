@@ -284,7 +284,13 @@ router.post("/chat", async (req, res) => {
     res.json({ reply, sessionId, seq: botMessage.seq, suggestions, navOptions });
   } catch (err) {
     console.error("chat error:", err.message);
-    res.status(500).json({ error: "Sorry, something went wrong generating a reply." });
+    // The visitor's message was already saved above, before the AI call, so
+    // return the current seq: the widget needs it to move past that message,
+    // or its next poll re-fetches and shows the same message a second time.
+    res.status(500).json({
+      error: "Sorry, something went wrong generating a reply.",
+      seq: session.seq,
+    });
   }
 });
 
